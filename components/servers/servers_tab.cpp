@@ -36,6 +36,10 @@ static string g_prevCursor_servers;
 static char s_searchBuffer[64]{};
 static char s_placeIdBuffer[32]{};
 
+static int s_minPlayersFilter = 0;
+static int s_maxPlayersFilter = 0;
+static int s_maxPingFilter = 0;
+
 static uint64_t g_current_placeId_servers = 0;
 
 static bool matchesQuery(const PublicServerInfo &srv, const string &qLower) {
@@ -46,6 +50,16 @@ static bool matchesQuery(const PublicServerInfo &srv, const string &qLower) {
                      static_cast<int>(srv.averageFps + 0.5));
     string lowerHay = toLower(hay);
     return lowerHay.find(qLower) != string::npos;
+}
+
+static bool passesFilters(const PublicServerInfo &srv) {
+    if (s_minPlayersFilter > 0 && srv.currentPlayers < s_minPlayersFilter)
+        return false;
+    if (s_maxPlayersFilter > 0 && srv.currentPlayers > s_maxPlayersFilter)
+        return false;
+    if (s_maxPingFilter > 0 && srv.averagePing > s_maxPingFilter)
+        return false;
+    return true;
 }
 
 static void fetchPageServers(uint64_t placeId, const string &cursor = {}) {
@@ -136,13 +150,28 @@ void RenderServersTab() {
     InputTextWithHint("##search_servers", "Search...", s_searchBuffer, sizeof(s_searchBuffer));
     PopItemWidth();
 
+    float filterFieldWidth = 80.0f;
+    PushItemWidth(filterFieldWidth);
+    if (InputInt("Min Players", &s_minPlayersFilter)) {
+        if (s_minPlayersFilter < 0) s_minPlayersFilter = 0;
+    }
+    SameLine(0, style.ItemSpacing.x);
+    if (InputInt("Max Players", &s_maxPlayersFilter)) {
+        if (s_maxPlayersFilter < 0) s_maxPlayersFilter = 0;
+    }
+    SameLine(0, style.ItemSpacing.x);
+    if (InputInt("Max Ping", &s_maxPingFilter)) {
+        if (s_maxPingFilter < 0) s_maxPingFilter = 0;
+    }
+    PopItemWidth();
+
     string qLower = toLower(s_searchBuffer);
     bool isSearching = !qLower.empty();
     vector<PublicServerInfo> displayList;
     if (isSearching) {
         for (const auto &pair_cache: g_pageCache) {
             for (const auto &srv: pair_cache.second.data) {
-                if (matchesQuery(srv, qLower))
+                if (matchesQuery(srv, qLower) && passesFilters(srv))
                     displayList.push_back(srv);
             }
         }
@@ -150,7 +179,9 @@ void RenderServersTab() {
             return guidToName(a.jobId) < guidToName(b.jobId);
         });
     } else {
-        displayList = s_cachedServers;
+        for (const auto &srv: s_cachedServers)
+            if (passesFilters(srv))
+                displayList.push_back(srv);
     }
 
     constexpr int columnCount = 5;
