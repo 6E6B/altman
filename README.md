@@ -65,6 +65,12 @@
 
 ---
 
+## Code Organization
+
+Utility helpers are organized in subfolders inside the `utils` directory: `core`, `network`, `system` and `ui`. Legacy headers remain at the root for backward compatibility.
+
+---
+
 ## Security
 
 * Your account cookies are **stored locally and encrypted**.

@@ -1,2 +1,2 @@
 #pragma once
-extern bool g_multiRobloxEnabled;
+#include "core/app_state.h"

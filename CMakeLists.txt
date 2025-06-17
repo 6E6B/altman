@@ -54,7 +54,7 @@ set(APP_SRC
         components/servers/servers_tab.cpp
         components/servers/servers_utils.cpp
         components/settings/settings_tab.cpp
-        utils/webview.hpp
+        utils/ui/webview.hpp
 )
 
 # Create executable
@@ -65,6 +65,10 @@ target_compile_features(altman PRIVATE cxx_std_20)
 target_include_directories(altman PRIVATE
         components
         utils
+        utils/core
+        utils/network
+        utils/system
+        utils/ui
 )
 
 find_package(unofficial-webview2 CONFIG REQUIRED)
