@@ -1,5 +1,5 @@
-﻿#include "./http.hpp"
-// #include "./status.h" // Status::Set is no longer used directly here, but Status::Get might be used by UI
+﻿#include "../network/http.hpp"
+// #include "../gui/status.h" // Status::Set is no longer used directly here, but Status::Get might be used by UI
 #include <windows.h>
 #include <iostream>
 #include <chrono>
@@ -8,8 +8,8 @@
 #include <vector>
 #include <utility>
 
-#include "logging.hpp"
-#include "notifications.h"
+#include "../logging/logging.hpp"
+#include "../gui/notifications.h"
 
 using namespace std;
 using namespace std::chrono;

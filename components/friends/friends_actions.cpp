@@ -1,6 +1,6 @@
 #include "friends_actions.h"
-#include "../utils/roblox_api.h"
-#include "../utils/status.h"
+#include "../utils/network/roblox_api.h"
+#include "../utils/gui/status.h"
 #include <algorithm>
 #include <vector>
 #include <string>

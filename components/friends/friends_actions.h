@@ -4,7 +4,7 @@
 #include <vector>
 #include <atomic>
 
-#include "../utils/roblox_api.h"
+#include "../utils/network/roblox_api.h"
 #include "../data.h"
 
 namespace FriendsActions {

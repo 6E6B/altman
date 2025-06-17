@@ -9,10 +9,10 @@
 #include "games/games.h"
 #include "history/history.h"
 #include "settings/settings.h"
-#include "utils/roblox_api.h"
-#include "utils/status.h"
-#include "utils/modal_popup.h"
-#include "utils/confirm.h"
+#include "utils/network/roblox_api.h"
+#include "utils/gui/status.h"
+#include "utils/gui/modal_popup.h"
+#include "utils/gui/confirm.h"
 
 using namespace ImGui;
 

@@ -54,7 +54,7 @@ set(APP_SRC
         components/servers/servers_tab.cpp
         components/servers/servers_utils.cpp
         components/settings/settings_tab.cpp
-        utils/webview.hpp
+        utils/network/webview.hpp
 )
 
 # Create executable

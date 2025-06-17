@@ -2,11 +2,11 @@
 #include <string>
 #include <windows.h>
 #include <nlohmann/json.hpp>
-#include "http.hpp"
-#include "logging.hpp"
-#include "main_thread.h"
-#include "confirm.h"
-#include "threading.h"
+#include "../network/http.hpp"
+#include "../logging/logging.hpp"
+#include "../threads/main_thread.h"
+#include "../gui/confirm.h"
+#include "../threads/threading.h"
 #include "../version.h"
 
 inline void CheckForUpdates() {

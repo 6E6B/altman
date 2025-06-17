@@ -6,10 +6,10 @@
 #include <array>
 #include <string>
 
-#include "../utils/roblox_api.h"
-#include "../utils/threading.h"
-#include "../utils/confirm.h"
-#include "../utils/app_state.h"
+#include "../utils/network/roblox_api.h"
+#include "../utils/threads/threading.h"
+#include "../utils/gui/confirm.h"
+#include "../utils/misc/app_state.h"
 #include "components.h"
 #include "data.h"
 

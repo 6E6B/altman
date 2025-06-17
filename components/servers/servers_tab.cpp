@@ -16,10 +16,10 @@
 #include <cstdio>
 
 #include "../components.h"
-#include "../../utils/roblox_api.h"
-#include "../../utils/status.h"
-#include "../../utils/launcher.hpp"
-#include "../../utils/modal_popup.h"
+#include "../../utils/network/roblox_api.h"
+#include "../../utils/gui/status.h"
+#include "../../utils/system/launcher.hpp"
+#include "../../utils/gui/modal_popup.h"
 #include "../../ui.h"
 
 using namespace ImGui;

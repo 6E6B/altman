@@ -6,7 +6,7 @@
 #include <sstream>
 #include <cpr/cpr.h>
 #include <nlohmann/json.hpp>
-#include "logging.hpp"
+#include "../logging/logging.hpp"
 
 using namespace std;
 

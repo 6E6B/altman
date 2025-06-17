@@ -12,16 +12,16 @@
 #include <unordered_set>
 #include <ctime>
 
-#include "main_thread.h"
-#include "webview.hpp"
-#include "../../utils/roblox_api.h"
+#include "threads/main_thread.h"
+#include "network/webview.hpp"
+#include "../../utils/network/roblox_api.h"
 #include "../components.h"
-#include "../../utils/time_utils.h"
-#include "../../utils/logging.hpp"
-#include "../../utils/status.h"
+#include "../../utils/misc/time_utils.h"
+#include "../../utils/logging/logging.hpp"
+#include "../../utils/gui/status.h"
 #include "../../ui.h"
 #include "../data.h"
-#include "../../utils/threading.h"
+#include "../../utils/threads/threading.h"
 
 using namespace ImGui;
 using namespace std;

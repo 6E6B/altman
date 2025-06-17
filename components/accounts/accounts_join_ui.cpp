@@ -9,15 +9,15 @@
 #include <utility>
 
 #include "roblox_api.h"
-#include "threading.h"
+#include "threads/threading.h"
 #include "../data.h"
 #include "../../ui.h"
-#include "../../utils/launcher.hpp"
-#include "../../utils/status.h"
-#include "../../utils/logging.hpp"
-#include "../../utils/modal_popup.h"
-#include "../../utils/confirm.h"
-#include "../../utils/app_state.h"
+#include "../../utils/system/launcher.hpp"
+#include "../../utils/gui/status.h"
+#include "../../utils/logging/logging.hpp"
+#include "../../utils/gui/modal_popup.h"
+#include "../../utils/gui/confirm.h"
+#include "../../utils/misc/app_state.h"
 
 #ifdef _WIN32
 #include <windows.h>

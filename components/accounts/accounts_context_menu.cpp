@@ -15,12 +15,12 @@
 #include <dwmapi.h>
 #include <memory>
 
-#include "../../utils/roblox_api.h"
-#include "../../utils/webview.hpp"
-#include "../../utils/threading.h"
-#include "../../utils/logging.hpp"
-#include "../../utils/status.h"
-#include "../../utils/confirm.h"
+#include "../../utils/network/roblox_api.h"
+#include "../../utils/network/webview.hpp"
+#include "../../utils/threads/threading.h"
+#include "../../utils/logging/logging.hpp"
+#include "../../utils/gui/status.h"
+#include "../../utils/gui/confirm.h"
 #include "../../ui.h"
 #include "../data.h"
 

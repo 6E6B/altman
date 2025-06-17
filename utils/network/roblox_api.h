@@ -6,9 +6,9 @@
 #include <stdexcept>
 #include <nlohmann/json.hpp>
 #include "http.hpp"
-#include "logging.hpp"
-#include "status.h"
-#include "threading.h"
+#include "../logging/logging.hpp"
+#include "../gui/status.h"
+#include "../threads/threading.h"
 
 #include "../components/components.h"
 

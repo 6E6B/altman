@@ -9,13 +9,13 @@
 
 
 #include "../data.h"
-#include "../../utils/roblox_api.h"
-#include "../../utils/launcher.hpp"
-#include "../../utils/threading.h"
+#include "../../utils/network/roblox_api.h"
+#include "../../utils/system/launcher.hpp"
+#include "../../utils/threads/threading.h"
 #include "./friends_actions.h"
-#include "../utils/webview.hpp"
+#include "../utils/network/webview.hpp"
 #include "../games/games_utils.h"
-#include "../../utils/confirm.h"
+#include "../../utils/gui/confirm.h"
 
 using namespace ImGui;
 using namespace std;

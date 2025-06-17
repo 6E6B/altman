@@ -18,11 +18,11 @@
 #include "log_parser.h"
 #include "history_utils.h"
 
-#include "../../utils/threading.h"
-#include "../../utils/launcher.hpp"
-#include "../../utils/modal_popup.h"
-#include "../../utils/status.h"
-#include "../../utils/confirm.h"
+#include "../../utils/threads/threading.h"
+#include "../../utils/system/launcher.hpp"
+#include "../../utils/gui/modal_popup.h"
+#include "../../utils/gui/status.h"
+#include "../../utils/gui/confirm.h"
 #include "../../ui.h"
 #include "../data.h"
 

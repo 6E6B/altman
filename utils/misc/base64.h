@@ -2,7 +2,7 @@
 #include <cctype>
 #include <string>
 #include <windows.h>
-#include "http.hpp"
+#include "../network/http.hpp"
 
 std::string base64_encode(const vector<BYTE> &data) {
     static const string base64_chars =

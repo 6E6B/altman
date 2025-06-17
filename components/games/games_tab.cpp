@@ -11,10 +11,10 @@
 #include <utility>
 
 #include "../components.h"
-#include "../../utils/launcher.hpp"
-#include "../../utils/roblox_api.h"
-#include "../../utils/status.h"
-#include "../../utils/modal_popup.h"
+#include "../../utils/system/launcher.hpp"
+#include "../../utils/network/roblox_api.h"
+#include "../../utils/gui/status.h"
+#include "../../utils/gui/modal_popup.h"
 #include "../../ui.h"
 #include "../servers/servers_utils.h"
 
