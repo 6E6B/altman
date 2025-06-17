@@ -285,8 +285,8 @@ void RenderHistoryTab() {
             PushID(i);
             if (Selectable(niceLabel(logInfo).c_str(), g_selected_log_idx == i))
                 g_selected_log_idx = i;
-            if (BeginPopupContextItem("HistoryRowCtx")) {
-                if (!logInfo.placeId.empty() && !logInfo.jobId.empty()) {
+            if (!logInfo.placeId.empty() && !logInfo.jobId.empty() &&
+                BeginPopupContextItem("HistoryRowCtx")) {
                     if (MenuItem("Copy Place ID")) {
                         SetClipboardText(logInfo.placeId.c_str());
                     }
@@ -338,8 +338,9 @@ void RenderHistoryTab() {
             Separator();
 
             Indent(desiredTextIndent / 2);
-            if (Button("Launch this game session")) {
-                if (!logInfo.placeId.empty() && !g_selectedAccountIds.empty()) {
+            bool canLaunch = !logInfo.placeId.empty() && !logInfo.jobId.empty() &&
+                             !g_selectedAccountIds.empty();
+            if (canLaunch && Button("Launch this game session")) {
                     uint64_t place_id_val = 0;
                     try {
                         place_id_val = stoull(logInfo.placeId);
@@ -366,16 +367,6 @@ void RenderHistoryTab() {
                     } else {
                         LOG_INFO("Invalid Place ID in log.");
                     }
-                } else {
-                    LOG_INFO("Place ID missing or no account selected.");
-                    if (g_selectedAccountIds.empty()) {
-                        Status::Error("No account selected to open log entry.");
-                        ModalPopup::Add("Select an account first.");
-                    } else {
-                        Status::Error("Invalid log entry.");
-                        ModalPopup::Add("Invalid log entry.");
-                    }
-                }
             }
 
             Separator();
