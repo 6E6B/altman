@@ -13,6 +13,7 @@
 #include "../data.h"
 #include "../../ui.h"
 #include "system/launcher.hpp"
+#include "system/roblox_control.h"
 #include "core/status.h"
 #include "core/logging.hpp"
 #include "ui/modal_popup.h"
@@ -24,26 +25,6 @@
 #include <tlhelp32.h>
 #endif
 
-#ifdef _WIN32
-static bool isRobloxRunning() {
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE)
-        return false;
-    PROCESSENTRY32 pe{};
-    pe.dwSize = sizeof(pe);
-    bool running = false;
-    if (Process32First(snap, &pe)) {
-        do {
-            if (_stricmp(pe.szExeFile, "RobloxPlayerBeta.exe") == 0) {
-                running = true;
-                break;
-            }
-        } while (Process32Next(snap, &pe));
-    }
-    CloseHandle(snap);
-    return running;
-}
-#endif
 
 using namespace ImGui;
 using namespace std;
@@ -161,6 +142,12 @@ void RenderJoinOptions() {
                     continue;
 
                 std::thread([placeId_val, jobId_str, cookie = it->cookie, account_id = it->id]() {
+                    if (g_killRobloxOnLaunch) {
+                        killRoblox();
+                    }
+                    if (g_clearRobloxCacheOnLaunch) {
+                        clearRobloxCache();
+                    }
                     LOG_INFO("Launching Roblox for account " + std::to_string(account_id) +
                              " PlaceID=" + std::to_string(placeId_val) +
                              (jobId_str.empty() ? "" : " JobID=" + jobId_str));

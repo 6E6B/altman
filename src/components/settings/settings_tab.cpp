@@ -5,6 +5,7 @@
 
 #include "../components.h"
 #include "../data.h"
+#include "core/app_state.h"
 
 using namespace ImGui;
 using namespace std;
@@ -63,6 +64,18 @@ void RenderSettingsTab()
                         g_checkUpdatesOnStartup = checkUpdates;
                         Data::SaveSettings("settings.json");
                 }
+                BeginDisabled(g_multiRobloxEnabled);
+                bool killOnLaunch = g_killRobloxOnLaunch;
+                if (Checkbox("Kill Roblox When Launching", &killOnLaunch)) {
+                        g_killRobloxOnLaunch = killOnLaunch;
+                        Data::SaveSettings("settings.json");
+                }
+                bool clearOnLaunch = g_clearRobloxCacheOnLaunch;
+                if (Checkbox("Clear Roblox Cache When Launching", &clearOnLaunch)) {
+                        g_clearRobloxCacheOnLaunch = clearOnLaunch;
+                        Data::SaveSettings("settings.json");
+                }
+                EndDisabled();
         }
         else
         {

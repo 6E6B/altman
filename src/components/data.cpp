@@ -31,6 +31,8 @@ array<char, 128> s_jobIdBuffer = {};
 array<char, 128> s_playerBuffer = {};
 int g_statusRefreshInterval = 1;
 bool g_checkUpdatesOnStartup = true;
+bool g_killRobloxOnLaunch = false;
+bool g_clearRobloxCacheOnLaunch = false;
 
 vector<BYTE> encryptData(const string &plainText) {
     DATA_BLOB DataIn;
@@ -264,6 +266,10 @@ namespace Data {
             g_statusRefreshInterval = j.value("statusRefreshInterval", 1);
             g_checkUpdatesOnStartup = j.value("checkUpdatesOnStartup", true);
             LOG_INFO("Default account ID = " + std::to_string(g_defaultAccountId));
+            g_killRobloxOnLaunch = j.value("killRobloxOnLaunch", false);
+            g_clearRobloxCacheOnLaunch = j.value("clearRobloxCacheOnLaunch", false);
+            LOG_INFO("Kill Roblox on launch = " + std::string(g_killRobloxOnLaunch ? "true" : "false"));
+            LOG_INFO("Clear cache on launch = " + std::string(g_clearRobloxCacheOnLaunch ? "true" : "false"));
             LOG_INFO("Status refresh interval = " + std::to_string(g_statusRefreshInterval));
             LOG_INFO("Check updates on startup = " + std::string(g_checkUpdatesOnStartup ? "true" : "false"));
         } catch (const std::exception &e) {
@@ -276,6 +282,8 @@ namespace Data {
         j["defaultAccountId"] = g_defaultAccountId;
         j["statusRefreshInterval"] = g_statusRefreshInterval;
         j["checkUpdatesOnStartup"] = g_checkUpdatesOnStartup;
+        j["killRobloxOnLaunch"] = g_killRobloxOnLaunch;
+        j["clearRobloxCacheOnLaunch"] = g_clearRobloxCacheOnLaunch;
         std::string path = MakePath(filename);
         std::ofstream out{path};
         if (!out.is_open()) {
@@ -286,6 +294,8 @@ namespace Data {
         LOG_INFO("Saved defaultAccountId=" + std::to_string(g_defaultAccountId));
         LOG_INFO("Saved statusRefreshInterval=" + std::to_string(g_statusRefreshInterval));
         LOG_INFO("Saved checkUpdatesOnStartup=" + std::string(g_checkUpdatesOnStartup ? "true" : "false"));
+        LOG_INFO("Saved killRobloxOnLaunch=" + std::string(g_killRobloxOnLaunch ? "true" : "false"));
+        LOG_INFO("Saved clearRobloxCacheOnLaunch=" + std::string(g_clearRobloxCacheOnLaunch ? "true" : "false"));
     }
 
     void LoadFriends(const std::string &filename) {

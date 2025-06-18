@@ -8,6 +8,7 @@
 
 #include "network/roblox.h"
 #include "system/threading.h"
+#include "system/roblox_control.h"
 #include "ui/confirm.h"
 #include "core/app_state.h"
 #include "components.h"
@@ -19,6 +20,7 @@ using namespace std;
 bool g_multiRobloxEnabled = false;
 static HANDLE g_hMutex = nullptr;
 
+static bool s_openClearCachePopup = false;
 static void EnableMultiInstance() {
 	if (!g_hMutex)
 		g_hMutex = CreateMutexW(nullptr, FALSE, L"ROBLOX_singletonEvent");
@@ -31,75 +33,6 @@ static void DisableMultiInstance() {
 	}
 }
 
-static string WStringToString(const wstring &wstr) {
-	if (wstr.empty())
-		return string();
-	int size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], static_cast<int>(wstr.size()), nullptr, 0, nullptr,
-	                                      nullptr);
-	string strTo(size_needed, 0);
-	WideCharToMultiByte(CP_UTF8, 0, &wstr[0], static_cast<int>(wstr.size()), &strTo[0], size_needed, nullptr, nullptr);
-	return strTo;
-}
-
-static void ClearDirectoryContents(const wstring &directoryPath) {
-	wstring searchPath = directoryPath + L"\\*";
-	WIN32_FIND_DATAW findFileData;
-	HANDLE hFind = FindFirstFileW(searchPath.c_str(), &findFileData);
-
-	if (hFind == INVALID_HANDLE_VALUE) {
-		DWORD error = GetLastError();
-
-		if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
-			LOG_INFO(
-				"ClearDirectoryContents: Directory to clear not found or is empty: " + WStringToString(directoryPath));
-		} else {
-			LOG_ERROR(
-				"ClearDirectoryContents: Failed to find first file in directory: " + WStringToString(directoryPath) +
-				" (Error: " + to_string(error) + ")");
-		}
-		return;
-	}
-
-	do {
-		const wstring itemName = findFileData.cFileName;
-		if (itemName == L"." || itemName == L"..") {
-			continue;
-		}
-
-		wstring itemFullPath = directoryPath + L"\\" + itemName;
-
-		if (findFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-			ClearDirectoryContents(itemFullPath);
-
-			if (!RemoveDirectoryW(itemFullPath.c_str())) {
-				LOG_ERROR(
-					"ClearDirectoryContents: Failed to remove sub-directory: " + WStringToString(itemFullPath) +
-					" (Error: " + to_string(GetLastError()) + ")");
-			} else {
-				LOG_INFO("ClearDirectoryContents: Removed sub-directory: " + WStringToString(itemFullPath));
-			}
-		} else {
-			if (!DeleteFileW(itemFullPath.c_str())) {
-				LOG_ERROR(
-					"ClearDirectoryContents: Failed to delete file: " + WStringToString(itemFullPath) + " (Error: " +
-					to_string(GetLastError()) + ")");
-			} else {
-				LOG_INFO("ClearDirectoryContents: Deleted file: " + WStringToString(itemFullPath));
-			}
-		}
-	} while (FindNextFileW(hFind, &findFileData) != 0);
-
-	FindClose(hFind);
-
-	DWORD lastError = GetLastError();
-	if (lastError != ERROR_NO_MORE_FILES) {
-		LOG_ERROR(
-			"ClearDirectoryContents: Error during file iteration in directory: " + WStringToString(directoryPath) +
-			" (Error: " + to_string(lastError) + ")");
-	}
-}
-
-bool RenderMainMenu() {
 	static array<char, 2048> s_cookieInputBuffer = {};
 
 	if (BeginMainMenuBar()) {
@@ -199,124 +132,17 @@ bool RenderMainMenu() {
 		}
 
 		if (BeginMenu("Utilities")) {
-			if (MenuItem("Kill Roblox")) {
-				HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-				PROCESSENTRY32 pe;
-				pe.dwSize = sizeof(pe);
+                        if (MenuItem("Kill Roblox")) {
+                                Threading::newThread(killRoblox);
+                        }
+                        if (MenuItem("Clear Roblox Cache")) {
+                                if (isRobloxRunning()) {
+                                        s_openClearCachePopup = true;
+                                } else {
+                                        Threading::newThread(clearRobloxCache);
+                                }
+                        }
 
-				if (Process32First(hSnap, &pe)) {
-					do {
-						if (_stricmp(pe.szExeFile, "RobloxPlayerBeta.exe") == 0) {
-							HANDLE hProc = OpenProcess(PROCESS_TERMINATE, FALSE, pe.th32ProcessID);
-							if (hProc) {
-								TerminateProcess(hProc, 0);
-								CloseHandle(hProc);
-								LOG_INFO(string("Terminated Roblox process: ") + to_string(pe.th32ProcessID));
-							} else {
-								LOG_ERROR(
-									string("Failed to open Roblox process for termination: ") + to_string(pe.
-										th32ProcessID) + " (Error: " + to_string(GetLastError()) + ")");
-							}
-						}
-					} while (Process32Next(hSnap, &pe));
-				} else {
-					LOG_ERROR(
-						string("Process32First failed when trying to kill Roblox. (Error: ") + to_string(GetLastError())
-						+ ")");
-				}
-				CloseHandle(hSnap);
-				LOG_INFO("Kill Roblox process completed.");
-			}
-
-			if (MenuItem("Clear Roblox Cache")) {
-				Threading::newThread([] {
-					LOG_INFO("Starting extended Roblox cache clearing process...");
-
-					WCHAR localAppDataPath_c[MAX_PATH];
-					if (!SUCCEEDED(
-						SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, localAppDataPath_c))) {
-						LOG_ERROR("Failed to get Local AppData path. Aborting cache clear.");
-						return;
-					}
-					wstring localAppDataPath_ws = localAppDataPath_c;
-
-					auto directoryExists = [](const wstring &path) -> bool {
-						DWORD attrib = GetFileAttributesW(path.c_str());
-						return (attrib != INVALID_FILE_ATTRIBUTES && (attrib & FILE_ATTRIBUTE_DIRECTORY));
-					};
-
-					wstring localStoragePath = localAppDataPath_ws + L"\\Roblox\\LocalStorage";
-					LOG_INFO("Processing directory for full removal: " + WStringToString(localStoragePath));
-					if (directoryExists(localStoragePath)) {
-						ClearDirectoryContents(localStoragePath);
-						if (RemoveDirectoryW(localStoragePath.c_str())) {
-							LOG_INFO("Successfully removed directory: " + WStringToString(localStoragePath));
-						} else {
-							LOG_ERROR(
-								"Failed to remove directory (it might not be fully empty or is in use): " +
-								WStringToString(localStoragePath) + " (Error: " + to_string(GetLastError()) + ")");
-						}
-					} else {
-						LOG_INFO("Directory not found, skipping: " + WStringToString(localStoragePath));
-					}
-
-					wstring otaPatchBackupsPath = localAppDataPath_ws + L"\\Roblox\\OTAPatchBackups";
-					LOG_INFO("Processing directory for full removal: " + WStringToString(otaPatchBackupsPath));
-					if (directoryExists(otaPatchBackupsPath)) {
-						ClearDirectoryContents(otaPatchBackupsPath);
-						if (RemoveDirectoryW(otaPatchBackupsPath.c_str())) {
-							LOG_INFO("Successfully removed directory: " + WStringToString(otaPatchBackupsPath));
-						} else {
-							LOG_ERROR(
-								"Failed to remove directory (it might not be fully empty or is in use): " +
-								WStringToString(otaPatchBackupsPath) + " (Error: " + to_string(GetLastError()) + ")");
-						}
-					} else {
-						LOG_INFO("Directory not found, skipping: " + WStringToString(otaPatchBackupsPath));
-					}
-
-					wstring robloxBasePath = localAppDataPath_ws + L"\\Roblox";
-					wstring rbxStoragePattern = robloxBasePath + L"\\rbx-storage.*";
-					LOG_INFO("Attempting to delete files matching pattern: " + WStringToString(rbxStoragePattern));
-
-					WIN32_FIND_DATAW findRbxData;
-					HANDLE hFindRbx = FindFirstFileW(rbxStoragePattern.c_str(), &findRbxData);
-					if (hFindRbx != INVALID_HANDLE_VALUE) {
-						do {
-							if (!(findRbxData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
-							    wcscmp(findRbxData.cFileName, L".") != 0 &&
-							    wcscmp(findRbxData.cFileName, L"..") != 0) {
-								wstring filePathToDelete = robloxBasePath + L"\\" + findRbxData.cFileName;
-								if (DeleteFileW(filePathToDelete.c_str())) {
-									LOG_INFO("Deleted file: " + WStringToString(filePathToDelete));
-								} else {
-									LOG_ERROR(
-										"Failed to delete file: " + WStringToString(filePathToDelete) + " (Error: " +
-										to_string(GetLastError()) + ")");
-								}
-							}
-						} while (FindNextFileW(hFindRbx, &findRbxData) != 0);
-						FindClose(hFindRbx);
-						DWORD findLastError = GetLastError();
-						if (findLastError != ERROR_NO_MORE_FILES) {
-							LOG_ERROR(
-								"Error during rbx-storage.* file iteration: " + WStringToString(robloxBasePath) +
-								" (Error: " + to_string(findLastError) + ")");
-						}
-					} else {
-						DWORD error = GetLastError();
-						if (error == ERROR_FILE_NOT_FOUND) {
-							LOG_INFO("No rbx-storage.* files found in: " + WStringToString(robloxBasePath));
-						} else {
-							LOG_ERROR(
-								"Failed to search for rbx-storage.* files in: " + WStringToString(robloxBasePath) +
-								" (Error: " + to_string(error) + ")");
-						}
-					}
-
-					LOG_INFO("Roblox cache clearing process finished.");
-				});
-			}
 
 			Separator();
 
@@ -334,7 +160,29 @@ bool RenderMainMenu() {
 		}
 
 		EndMainMenuBar();
-	}
+        }
+        if (s_openClearCachePopup) {
+                ImGui::OpenPopup("ClearRobloxCacheConfirm");
+                s_openClearCachePopup = false;
+        }
+        if (BeginPopupModal("ClearRobloxCacheConfirm", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+                TextWrapped("RobloxPlayerBeta is running. Kill it before clearing the cache?");
+                Spacing();
+                if (Button("Kill", ImVec2(100, 0))) {
+                        Threading::newThread([] { killRoblox(); clearRobloxCache(); });
+                        CloseCurrentPopup();
+                }
+                SameLine();
+                if (Button("Don't kill", ImVec2(100, 0))) {
+                        Threading::newThread(clearRobloxCache);
+                        CloseCurrentPopup();
+                }
+                SameLine();
+                if (Button("Cancel", ImVec2(100, 0))) {
+                        CloseCurrentPopup();
+                }
+                EndPopup();
+        }
 
 	if (BeginPopupModal("AddAccountPopup_Browser", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
 		Text("Browser-based account addition not yet implemented.");
