@@ -8,7 +8,6 @@
 #include "core/logging.hpp"
 #include "status.h"
 
-using namespace std;
 
 namespace RobloxApi {
         enum class BanCheckResult {
@@ -17,7 +16,7 @@ namespace RobloxApi {
                 Banned
         };
 
-        static nlohmann::json getAuthenticatedUser(const string &cookie) {
+        static nlohmann::json getAuthenticatedUser(const std::string &cookie) {
                 LOG_INFO("Fetching profile info");
                 HttpClient::Response response = HttpClient::get(
                         "https://users.roblox.com/v1/users/authenticated",
@@ -31,7 +30,7 @@ namespace RobloxApi {
                 return HttpClient::decode(response);
         }
 
-        static BanCheckResult checkBanStatus(const string &cookie) {
+        static BanCheckResult checkBanStatus(const std::string &cookie) {
                 LOG_INFO("Checking moderation status");
                 HttpClient::Response response = HttpClient::get(
                         "https://usermoderation.roblox.com/v1/not-approved",
@@ -50,20 +49,19 @@ namespace RobloxApi {
                 return BanCheckResult::Unbanned;
         }
 
-        static bool isCookieValid(const string &cookie) {
+        static bool isCookieValid(const std::string &cookie) {
                 return checkBanStatus(cookie) != BanCheckResult::InvalidCookie;
         }
 
-        static string fetchAuthTicket(const string &cookie) {
+        static std::string fetchAuthTicket(const std::string &cookie) {
                 LOG_INFO("Fetching x-csrf token");
-                cout << cookie;
                 auto csrfResponse = HttpClient::post(
                         "https://auth.roblox.com/v1/authentication-ticket",
                         {{"Cookie", ".ROBLOSECURITY=" + cookie}});
 
                 auto csrfToken = csrfResponse.headers.find("x-csrf-token");
                 if (csrfToken == csrfResponse.headers.end()) {
-                        cerr << "failed to get CSRF token\n";
+                        std::cerr << "failed to get CSRF token\n";
 
                         LOG_INFO("Failed to get CSRF token");
                         return "";
@@ -81,7 +79,7 @@ namespace RobloxApi {
 
                 auto ticket = ticketResponse.headers.find("rbx-authentication-ticket");
                 if (ticket == ticketResponse.headers.end()) {
-                        cerr << "failed to get authentication ticket\n";
+                        std::cerr << "failed to get authentication ticket\n";
                         LOG_INFO("Failed to get authentication ticket");
                         return "";
                 }
@@ -89,17 +87,17 @@ namespace RobloxApi {
                 return ticket->second;
         }
 
-        static uint64_t getUserId(const string &cookie) {
+        static uint64_t getUserId(const std::string &cookie) {
                 auto userJson = getAuthenticatedUser(cookie);
                 return userJson.value("id", 0ULL);
         }
 
-        static string getUsername(const string &cookie) {
+        static std::string getUsername(const std::string &cookie) {
                 auto userJson = getAuthenticatedUser(cookie);
                 return userJson.value("name", "");
         }
 
-        static string getDisplayName(const string &cookie) {
+        static std::string getDisplayName(const std::string &cookie) {
                 auto userJson = getAuthenticatedUser(cookie);
                 return userJson.value("displayName", "");
         }

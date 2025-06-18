@@ -9,11 +9,10 @@
 #include "core/logging.hpp"
 #include "status.h"
 
-using namespace std;
 
 namespace RobloxApi {
-        static string getPresence(
-                const string &cookie,
+        static std::string getPresence(
+                const std::string &cookie,
                 uint64_t userId) {
                 LOG_INFO("Fetching user presence");
                 nlohmann::json payload = {{"userIds", {userId}}};
@@ -31,13 +30,7 @@ namespace RobloxApi {
                         return "Offline";
                 }
 
-                OutputDebugStringA(("Raw response: " + response.text).c_str());
-                LOG_INFO("Raw response body: " + response.text);
-
                 auto json = HttpClient::decode(response);
-
-                OutputDebugStringA(("Parsed JSON: " + json.dump()).c_str());
-                LOG_INFO("Parsed JSON: " + json.dump());
 
                 if (json.contains("userPresences") && json["userPresences"].is_array() && !json["userPresences"].empty()) {
                         const auto &jsonData = json["userPresences"][0];
@@ -53,7 +46,7 @@ namespace RobloxApi {
                 time_t bannedUntil = 0;
         };
 
-        static VoiceSettings getVoiceChatStatus(const string &cookie) {
+        static VoiceSettings getVoiceChatStatus(const std::string &cookie) {
                 LOG_INFO("Fetching voice chat settings");
                 auto resp = HttpClient::get(
                         "https://voice.roblox.com/v1/settings",
@@ -90,15 +83,15 @@ namespace RobloxApi {
         }
 
         struct PresenceData {
-                string presence;
-                string lastLocation;
+                std::string presence;
+                std::string lastLocation;
                 uint64_t placeId = 0;
-                string gameId;
+                std::string gameId;
         };
 
-        static unordered_map<uint64_t, PresenceData>
-        getPresences(const vector<uint64_t> &userIds,
-                     const string &cookie) {
+        static std::unordered_map<uint64_t, PresenceData>
+        getPresences(const std::vector<uint64_t> &userIds,
+                     const std::string &cookie) {
                 nlohmann::json payload = {{"userIds", userIds}};
 
                 auto resp = HttpClient::post(
@@ -112,7 +105,7 @@ namespace RobloxApi {
                 }
 
                 nlohmann::json j = HttpClient::decode(resp);
-                unordered_map<uint64_t, PresenceData> out;
+                std::unordered_map<uint64_t, PresenceData> out;
 
                 if (j.contains("userPresences") && j["userPresences"].is_array()) {
                         for (auto &up: j["userPresences"]) {
@@ -122,7 +115,7 @@ namespace RobloxApi {
                                 if (up.contains("placeId") && up["placeId"].is_number_unsigned())
                                         d.placeId = up["placeId"].get<uint64_t>();
                                 if (up.contains("gameId") && !up["gameId"].is_null())
-                                        d.gameId = up["gameId"].get<string>();
+                                        d.gameId = up["gameId"].get<std::string>();
                                 if (up.contains("userId"))
                                         out[up["userId"].get<uint64_t>()] = move(d);
                         }

@@ -13,10 +13,9 @@
 
 #include "../../components/components.h"
 
-using namespace std;
 
 namespace RobloxApi {
-        static vector<FriendInfo> getFriends(const string &userId, const string &cookie) {
+        static std::vector<FriendInfo> getFriends(const std::string &userId, const std::string &cookie) {
                 LOG_INFO("Fetching friends list");
 
                 HttpClient::Response resp = HttpClient::get(
@@ -29,7 +28,7 @@ namespace RobloxApi {
                 }
 
                 nlohmann::json j = HttpClient::decode(resp);
-                vector<FriendInfo> friends;
+                std::vector<FriendInfo> friends;
                 if (j.contains("data") && j["data"].is_array()) {
                         for (const auto &item: j["data"]) {
                                 FriendInfo f;
@@ -42,7 +41,7 @@ namespace RobloxApi {
                 return friends;
         }
 
-        static FriendInfo getUserInfo(const string &userId) {
+        static FriendInfo getUserInfo(const std::string &userId) {
                 LOG_INFO("Fetching user info");
                 HttpClient::Response resp = HttpClient::get(
                         "https://users.roblox.com/v1/users/" + userId,
@@ -65,25 +64,25 @@ namespace RobloxApi {
 
         struct FriendDetail {
                 uint64_t id = 0;
-                string username;
-                string displayName;
-                string description;
-                string createdIso;
+                std::string username;
+                std::string displayName;
+                std::string description;
+                std::string createdIso;
                 int followers = 0;
                 int following = 0;
                 int placeVisits = 0;
-                string presence;
+                std::string presence;
         };
 
-        static FriendDetail getUserDetails(const string &userId,
-                                           const string &cookie) {
+        static FriendDetail getUserDetails(const std::string &userId,
+                                           const std::string &cookie) {
                 FriendDetail d;
-                mutex m;
-                condition_variable cv;
+                std::mutex m;
+                std::condition_variable cv;
                 int remaining = 3;
 
                 auto signalDone = [&] {
-                        lock_guard<mutex> lk(m);
+                        std::lock_guard<std::mutex> lk(m);
                         if (--remaining == 0)
                                 cv.notify_one();
                 };
@@ -134,7 +133,7 @@ namespace RobloxApi {
                         signalDone();
                 });
 
-                unique_lock<mutex> lk(m);
+                std::unique_lock<std::mutex> lk(m);
                 cv.wait(lk, [&] {
                         return remaining == 0;
                 });
@@ -142,7 +141,7 @@ namespace RobloxApi {
                 return d;
         }
 
-        inline uint64_t getUserIdFromUsername(const string &username) {
+        inline uint64_t getUserIdFromUsername(const std::string &username) {
                 nlohmann::json payload = {
                         {"usernames", {username}},
                         {"excludeBannedUsers", true}
@@ -167,17 +166,17 @@ namespace RobloxApi {
                 return j["data"][0].value("id", 0ULL);
         }
 
-        inline bool sendFriendRequest(const string &targetUserId,
-                                      const string &cookie,
-                                      string *outResponse = nullptr) {
-                string url = "https://friends.roblox.com/v1/users/" + targetUserId +
+        inline bool sendFriendRequest(const std::string &targetUserId,
+                                      const std::string &cookie,
+                                      std::string *outResponse = nullptr) {
+                std::string url = "https://friends.roblox.com/v1/users/" + targetUserId +
                              "/request-friendship";
 
                 auto csrfResp = HttpClient::post(url, {{"Cookie", ".ROBLOSECURITY=" + cookie}});
                 auto it = csrfResp.headers.find("x-csrf-token");
                 if (it == csrfResp.headers.end()) {
                         if (outResponse) *outResponse = "Missing CSRF token";
-                        cerr << "friend request: missing CSRF token\n";
+                        std::cerr << "friend request: missing CSRF token\n";
                         return false;
                 }
 
@@ -198,24 +197,24 @@ namespace RobloxApi {
                 if (outResponse) *outResponse = resp.text;
 
                 if (resp.status_code != 200) {
-                        cerr << "friend request failed HTTP " << resp.status_code << ": " << resp.text << "\n";
+                        std::cerr << "friend request failed HTTP " << resp.status_code << ": " << resp.text << "\n";
                         return false;
                 }
 
                 auto j = HttpClient::decode(resp);
                 bool success = j.value("success", false);
                 if (success) {
-                        cerr << "friend request success: " << resp.text << "\n";
+                        std::cerr << "friend request success: " << resp.text << "\n";
                 } else {
-                        cerr << "friend request API failure: " << resp.text << "\n";
+                        std::cerr << "friend request API failure: " << resp.text << "\n";
                 }
                 return success;
         }
 
-        inline bool unfriend(const string &targetUserId,
-                             const string &cookie,
-                             string *outResponse = nullptr) {
-                string url = "https://friends.roblox.com/v1/users/" + targetUserId +
+        inline bool unfriend(const std::string &targetUserId,
+                             const std::string &cookie,
+                             std::string *outResponse = nullptr) {
+                std::string url = "https://friends.roblox.com/v1/users/" + targetUserId +
                              "/unfriend";
 
                 auto csrfResp = HttpClient::post(url, {{"Cookie", ".ROBLOSECURITY=" + cookie}});
@@ -238,15 +237,15 @@ namespace RobloxApi {
                 if (outResponse) *outResponse = resp.text;
 
                 if (resp.status_code != 200) {
-                        cerr << "unfriend failed HTTP " << resp.status_code << ": " << resp.text << "\n";
+                        std::cerr << "unfriend failed HTTP " << resp.status_code << ": " << resp.text << "\n";
                         return false;
                 }
 
                 return true;
         }
 
-        inline bool followUser(const string &targetUserId, const string &cookie, string *outResponse = nullptr) {
-                string url = "https://friends.roblox.com/v1/users/" + targetUserId + "/follow";
+        inline bool followUser(const std::string &targetUserId, const std::string &cookie, std::string *outResponse = nullptr) {
+                std::string url = "https://friends.roblox.com/v1/users/" + targetUserId + "/follow";
 
                 auto csrfResp = HttpClient::post(url, {{"Cookie", ".ROBLOSECURITY=" + cookie}});
                 auto it = csrfResp.headers.find("x-csrf-token");
@@ -269,8 +268,8 @@ namespace RobloxApi {
                 return resp.status_code == 200;
         }
 
-        inline bool unfollowUser(const string &targetUserId, const string &cookie, string *outResponse = nullptr) {
-                string url = "https://friends.roblox.com/v1/users/" + targetUserId + "/unfollow";
+        inline bool unfollowUser(const std::string &targetUserId, const std::string &cookie, std::string *outResponse = nullptr) {
+                std::string url = "https://friends.roblox.com/v1/users/" + targetUserId + "/unfollow";
 
                 auto csrfResp = HttpClient::post(url, {{"Cookie", ".ROBLOSECURITY=" + cookie}});
                 auto it = csrfResp.headers.find("x-csrf-token");
@@ -293,8 +292,8 @@ namespace RobloxApi {
                 return resp.status_code == 200;
         }
 
-        inline bool blockUser(const string &targetUserId, const string &cookie,string *outResponse = nullptr) {
-                string url = "https://www.roblox.com/users/" + targetUserId + "/block";
+        inline bool blockUser(const std::string &targetUserId, const std::string &cookie,std::string *outResponse = nullptr) {
+                std::string url = "https://www.roblox.com/users/" + targetUserId + "/block";
 
                 auto csrfResp = HttpClient::post(url, {{"Cookie", ".ROBLOSECURITY=" + cookie}});
                 auto it = csrfResp.headers.find("x-csrf-token");

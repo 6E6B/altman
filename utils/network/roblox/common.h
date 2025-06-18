@@ -4,9 +4,8 @@
 #include <random>
 #include <string>
 
-using namespace std;
 
-static ImVec4 getStatusColor(string statusCode) {
+static ImVec4 getStatusColor(std::string statusCode) {
         if (statusCode == "Online") {
                 return ImVec4(0.6f, 0.8f, 0.95f, 1.0f);
         }
@@ -25,13 +24,13 @@ static ImVec4 getStatusColor(string statusCode) {
         return ImVec4(0.8f, 0.8f, 0.8f, 1.0f);
 }
 
-static string generateSessionId() {
+static std::string generateSessionId() {
         static auto hex = "0123456789abcdef";
         random_device rd;
         mt19937 gen(rd());
         uniform_int_distribution<> dis(0, 15);
 
-        string uuid(36, ' ');
+        std::string uuid(36, ' ');
         for (int i = 0; i < 36; i++) {
                 switch (i) {
                         case 8:
@@ -53,7 +52,7 @@ static string generateSessionId() {
         return uuid;
 }
 
-static string presenceTypeToString(int type) {
+static std::string presenceTypeToString(int type) {
         switch (type) {
                 case 1:
                         return "Online";

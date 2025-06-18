@@ -10,24 +10,23 @@
 
 #include "../../components/components.h"
 
-using namespace std;
 
 namespace RobloxApi {
         struct GameDetail {
-                string genre;
-                string description;
+                std::string genre;
+                std::string description;
                 uint64_t visits = 0;
                 int maxPlayers = 0;
-                string createdIso;
-                string updatedIso;
+                std::string createdIso;
+                std::string updatedIso;
 
-                string creatorName;
+                std::string creatorName;
                 bool creatorVerified = false;
         };
 
         inline GameDetail getGameDetail(uint64_t universeId) {
                 using nlohmann::json;
-                const string url =
+                const std::string url =
                                 "https://games.roblox.com/v1/games?universeIds=" + to_string(universeId);
 
                 HttpClient::Response resp = HttpClient::get(url);
@@ -62,14 +61,14 @@ namespace RobloxApi {
         }
 
         struct ServerPage {
-                vector<PublicServerInfo> data;
-                string nextCursor;
-                string prevCursor;
+                std::vector<PublicServerInfo> data;
+                std::string nextCursor;
+                std::string prevCursor;
         };
 
         static ServerPage getPublicServersPage(uint64_t placeId,
-                                               const string &cursor = {}) {
-                string url =
+                                               const std::string &cursor = {}) {
+                std::string url =
                                 "https://games.roblox.com/v1/games/" + to_string(placeId) +
                                 "/servers/Public?sortOrder=Asc&limit=100" +
                                 (cursor.empty() ? "" : "&cursor=" + cursor);
@@ -85,14 +84,14 @@ namespace RobloxApi {
                 ServerPage page;
                 if (json.contains("nextPageCursor")) {
                         page.nextCursor = json["nextPageCursor"].is_null()
-                                                  ? string{}
-                                                  : json["nextPageCursor"].get<string>();
+                                                  ? std::string{}
+                                                  : json["nextPageCursor"].get<std::string>();
                 }
 
                 if (json.contains("previousPageCursor")) {
                         page.prevCursor = json["previousPageCursor"].is_null()
-                                                  ? string{}
-                                                  : json["previousPageCursor"].get<string>();
+                                                  ? std::string{}
+                                                  : json["previousPageCursor"].get<std::string>();
                 }
 
                 if (json.contains("data") && json["data"].is_array()) {
@@ -109,8 +108,8 @@ namespace RobloxApi {
                 return page;
         }
 
-        static vector<GameInfo> searchGames(const string &query) {
-                const string sessionId = generateSessionId();
+        static std::vector<GameInfo> searchGames(const std::string &query) {
+                const std::string sessionId = generateSessionId();
                 auto resp = HttpClient::get(
                         "https://apis.roblox.com/search-api/omni-search",
                         {{"Accept", "application/json"}},
@@ -121,7 +120,7 @@ namespace RobloxApi {
                                 {"pageType", "all"}
                         });
 
-                vector<GameInfo> out;
+                std::vector<GameInfo> out;
                 if (resp.status_code != 200) {
                         return out;
                 }
