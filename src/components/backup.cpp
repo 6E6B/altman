@@ -1,7 +1,7 @@
 #include "backup.h"
 #include "data.h"
-#include "utils/core/logging.hpp"
-#include "utils/system/threading.h"
+#include "../utils/core/logging.hpp"
+#include "../utils/system/threading.h"
 #include "network/roblox.h"
 #include <nlohmann/json.hpp>
 #include <fstream>
