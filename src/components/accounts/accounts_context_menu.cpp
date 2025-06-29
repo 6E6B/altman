@@ -144,12 +144,10 @@ void RenderAccountContextMenu(AccountData &account, const string &unique_context
                     string luau = "game:GetService(\"TeleportService\"):TeleportToPlaceInstance(" + to_string(placeId) +
                                   ", \"" + jobId + "\")";
                     if (MenuItem("ROBLOX Luau")) SetClipboardText(luau.c_str());
-                    ImGui::EndMenu();
-                }
-                if (MenuItem("Generate Invite Link")) {
                     string link = "https://www.roblox.com/games/start?placeId=" + to_string(placeId) +
                                   "&gameInstanceId=" + jobId;
-                    SetClipboardText(link.c_str());
+                    if (MenuItem("Browser Link")) SetClipboardText(link.c_str());
+                    ImGui::EndMenu();
                 }
                 Separator();
             }

@@ -65,6 +65,17 @@ void RenderSettingsTab()
                         Data::SaveSettings("settings.json");
                 }
 
+                bool multi = g_multiRobloxEnabled;
+                if (Checkbox("Multi Roblox", &multi))
+                {
+                        g_multiRobloxEnabled = multi;
+                        if (g_multiRobloxEnabled)
+                                RobloxControl::EnableMultiInstance();
+                        else
+                                RobloxControl::DisableMultiInstance();
+                        Data::SaveSettings("settings.json");
+                }
+
                 BeginDisabled(g_multiRobloxEnabled);
                 bool killOnLaunch = g_killRobloxOnLaunch;
                 if (Checkbox("Kill Roblox When Launching", &killOnLaunch))

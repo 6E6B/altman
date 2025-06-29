@@ -9,6 +9,19 @@
 #include "../core/logging.hpp"
 
 namespace RobloxControl {
+inline HANDLE g_multiMutex = nullptr;
+
+inline void EnableMultiInstance() {
+    if (!g_multiMutex)
+        g_multiMutex = CreateMutexW(nullptr, FALSE, L"ROBLOX_singletonEvent");
+}
+
+inline void DisableMultiInstance() {
+    if (g_multiMutex) {
+        CloseHandle(g_multiMutex);
+        g_multiMutex = nullptr;
+    }
+}
 inline bool IsRobloxRunning() {
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snap == INVALID_HANDLE_VALUE)

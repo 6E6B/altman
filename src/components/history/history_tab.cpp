@@ -349,12 +349,12 @@ void RenderHistoryTab() {
 
 					if (place_id_val > 0) {
 						vector<pair<int, string> > accounts;
-						for (int id: g_selectedAccountIds) {
-							auto it = find_if(g_accounts.begin(), g_accounts.end(),
-							                  [&](const AccountData &a) { return a.id == id; });
-							if (it != g_accounts.end())
-								accounts.emplace_back(it->id, it->cookie);
-						}
+                                                for (int id: g_selectedAccountIds) {
+                                                        auto it = find_if(g_accounts.begin(), g_accounts.end(),
+                                                                          [&](const AccountData &a) { return a.id == id; });
+                                                        if (it != g_accounts.end() && it->status != "Banned")
+                                                                accounts.emplace_back(it->id, it->cookie);
+                                                }
 						if (!accounts.empty()) {
 							LOG_INFO("Launching game from history...");
 							thread([place_id_val, jobId = logInfo.jobId, accounts]() {

@@ -207,7 +207,7 @@ void RenderFriendsTab() {
                             auto itA = find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a) {
                                 return a.id == id;
                             });
-                            if (itA != g_accounts.end())
+                            if (itA != g_accounts.end() && itA->status != "Banned")
                                 accounts.emplace_back(itA->id, itA->cookie);
                         }
                         if (!accounts.empty()) {
@@ -320,6 +320,12 @@ void RenderFriendsTab() {
             Separator();
             PushStyleColor(ImGuiCol_Text, ImVec4(1.f, 0.4f, 0.4f, 1.f));
             TextUnformatted("Friends Lost:");
+            SameLine();
+            if (SmallButton("Clear")) {
+                g_unfriended.clear();
+                g_unfriendedFriends[acct.id].clear();
+                Data::SaveFriends();
+            }
             for (const auto &uf: g_unfriended) {
                 string name = uf.displayName.empty() || uf.displayName == uf.username
                                   ? uf.username
@@ -475,7 +481,7 @@ void RenderFriendsTab() {
                 for (int id: g_selectedAccountIds) {
                     auto it = find_if(g_accounts.begin(), g_accounts.end(),
                                       [&](const AccountData &a) { return a.id == id; });
-                    if (it != g_accounts.end())
+                    if (it != g_accounts.end() && it->status != "Banned")
                         accounts.emplace_back(it->id, it->cookie);
                 }
                 if (!accounts.empty()) {

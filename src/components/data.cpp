@@ -12,6 +12,7 @@
 
 #include "core/base64.h"
 #include "core/logging.hpp"
+#include "system/roblox_control.h"
 
 #pragma comment(lib, "Crypt32.lib")
 
@@ -33,6 +34,7 @@ int g_statusRefreshInterval = 1;
 bool g_checkUpdatesOnStartup = true;
 bool g_killRobloxOnLaunch = false;
 bool g_clearCacheOnLaunch = false;
+bool g_multiRobloxEnabled = false;
 
 vector<BYTE> encryptData(const string &plainText) {
     DATA_BLOB DataIn;
@@ -267,11 +269,17 @@ namespace Data {
             g_checkUpdatesOnStartup = j.value("checkUpdatesOnStartup", true);
             g_killRobloxOnLaunch = j.value("killRobloxOnLaunch", false);
             g_clearCacheOnLaunch = j.value("clearCacheOnLaunch", false);
+            g_multiRobloxEnabled = j.value("multiRobloxEnabled", false);
+            if (g_multiRobloxEnabled)
+                RobloxControl::EnableMultiInstance();
+            else
+                RobloxControl::DisableMultiInstance();
             LOG_INFO("Default account ID = " + std::to_string(g_defaultAccountId));
             LOG_INFO("Status refresh interval = " + std::to_string(g_statusRefreshInterval));
             LOG_INFO("Check updates on startup = " + std::string(g_checkUpdatesOnStartup ? "true" : "false"));
             LOG_INFO("Kill Roblox on launch = " + std::string(g_killRobloxOnLaunch ? "true" : "false"));
             LOG_INFO("Clear cache on launch = " + std::string(g_clearCacheOnLaunch ? "true" : "false"));
+            LOG_INFO("Multi Roblox enabled = " + std::string(g_multiRobloxEnabled ? "true" : "false"));
         } catch (const std::exception &e) {
             LOG_ERROR("Failed to parse " + filename + ": " + e.what());
         }
@@ -284,6 +292,7 @@ namespace Data {
         j["checkUpdatesOnStartup"] = g_checkUpdatesOnStartup;
         j["killRobloxOnLaunch"] = g_killRobloxOnLaunch;
         j["clearCacheOnLaunch"] = g_clearCacheOnLaunch;
+        j["multiRobloxEnabled"] = g_multiRobloxEnabled;
         std::string path = MakePath(filename);
         std::ofstream out{path};
         if (!out.is_open()) {
@@ -296,6 +305,7 @@ namespace Data {
         LOG_INFO("Saved checkUpdatesOnStartup=" + std::string(g_checkUpdatesOnStartup ? "true" : "false"));
         LOG_INFO("Saved killRobloxOnLaunch=" + std::string(g_killRobloxOnLaunch ? "true" : "false"));
         LOG_INFO("Saved clearCacheOnLaunch=" + std::string(g_clearCacheOnLaunch ? "true" : "false"));
+        LOG_INFO("Saved multiRobloxEnabled=" + std::string(g_multiRobloxEnabled ? "true" : "false"));
     }
 
     void LoadFriends(const std::string &filename) {

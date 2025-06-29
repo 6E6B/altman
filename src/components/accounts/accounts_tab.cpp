@@ -39,9 +39,11 @@ void RenderAccountsTable(vector<AccountData> &accounts_to_display, const char *t
 	                              ImGuiTableFlags_ScrollY | ImGuiTableFlags_Hideable | ImGuiTableFlags_Reorderable |
 	                              ImGuiTableFlags_ContextMenuInBody;
 
-	if (g_selectedAccountIds.empty() && g_defaultAccountId != -1) {
-		g_selectedAccountIds.insert(g_defaultAccountId);
-	}
+        if (g_selectedAccountIds.empty() && g_defaultAccountId != -1) {
+                auto it = std::find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a){return a.id == g_defaultAccountId;});
+                if (it != g_accounts.end() && it->status != "Banned")
+                        g_selectedAccountIds.insert(g_defaultAccountId);
+        }
 
 	if (BeginTable(table_id, column_count, table_flags, ImVec2(0.0f, table_height > 0 ? table_height - 2.0f : 0.0f))) {
 		TableSetupColumn("Display Name", ImGuiTableColumnFlags_WidthStretch);
@@ -92,20 +94,22 @@ void RenderAccountsTable(vector<AccountData> &accounts_to_display, const char *t
 			char selectable_label[64];
 			snprintf(selectable_label, sizeof(selectable_label), "##row_selectable_%d", account.id);
 
-			if (Selectable(
-				selectable_label,
-				is_row_selected,
-				ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowItemOverlap,
-				ImVec2(0, row_interaction_height))) {
-				if (GetIO().KeyCtrl) {
-					if (is_row_selected) g_selectedAccountIds.erase(account.id);
-					else g_selectedAccountIds.insert(account.id);
-				} else {
-					bool was_already_solely_selected = (is_row_selected && g_selectedAccountIds.size() == 1);
-					g_selectedAccountIds.clear();
-					if (!was_already_solely_selected) g_selectedAccountIds.insert(account.id);
-				}
-			}
+                        BeginDisabled(account.status == "Banned");
+                        if (Selectable(
+                                selectable_label,
+                                is_row_selected,
+                                ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowItemOverlap,
+                                ImVec2(0, row_interaction_height))) {
+                                if (GetIO().KeyCtrl) {
+                                        if (is_row_selected) g_selectedAccountIds.erase(account.id);
+                                        else g_selectedAccountIds.insert(account.id);
+                                } else {
+                                        bool was_already_solely_selected = (is_row_selected && g_selectedAccountIds.size() == 1);
+                                        g_selectedAccountIds.clear();
+                                        if (!was_already_solely_selected) g_selectedAccountIds.insert(account.id);
+                                }
+                        }
+                        EndDisabled();
 
 			static std::unordered_map<int, double> holdStartTimes;
 			if (IsItemActivated() && IsMouseDown(ImGuiMouseButton_Left)) {

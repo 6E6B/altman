@@ -97,7 +97,7 @@ bool RenderUI() {
                 if (!first)
                     selectedNames += ", ";
                 string name = it->displayName.empty() ? it->username : it->displayName;
-                if (first && id == g_defaultAccountId)
+                if (first)
                     name += "*";
                 selectedNames += name;
                 first = false;

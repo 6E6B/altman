@@ -100,7 +100,7 @@ void RenderJoinOptions() {
                 for (int id : g_selectedAccountIds) {
                     auto it = std::find_if(g_accounts.begin(), g_accounts.end(),
                                            [id](auto &a) { return a.id == id; });
-                    if (it != g_accounts.end())
+                    if (it != g_accounts.end() && it->status != "Banned")
                         accounts.emplace_back(it->id, it->cookie);
                 }
                 if (accounts.empty())
@@ -150,7 +150,7 @@ void RenderJoinOptions() {
             for (int id : g_selectedAccountIds) {
                 auto it = std::find_if(g_accounts.begin(), g_accounts.end(),
                                        [id](auto &a) { return a.id == id; });
-                if (it != g_accounts.end())
+                if (it != g_accounts.end() && it->status != "Banned")
                     accounts.emplace_back(it->id, it->cookie);
             }
 
