@@ -13,6 +13,8 @@
 #include "core/app_state.h"
 #include "components.h"
 #include "data.h"
+#include "backup.h"
+#include "ui/modal_popup.h"
 
 using namespace ImGui;
 using namespace std;
@@ -36,6 +38,12 @@ static void DisableMultiInstance() {
 bool RenderMainMenu() {
         static array<char, 2048> s_cookieInputBuffer = {};
         static bool s_openClearCachePopup = false;
+        static bool s_openExportPopup = false;
+        static bool s_openImportPopup = false;
+        static char s_importFilePath[260] = "";
+        static char s_password1[128] = "";
+        static char s_password2[128] = "";
+        static char s_importPassword[128] = "";
 
 	if (BeginMainMenuBar()) {
 		if (BeginMenu("Accounts")) {
@@ -182,6 +190,14 @@ bool RenderMainMenu() {
 #endif
                         }
 
+                        if (MenuItem("Export Backup")) {
+                                s_openExportPopup = true;
+                        }
+
+                        if (MenuItem("Import Backup")) {
+                                s_openImportPopup = true;
+                        }
+
 			Separator();
 
 			if (MenuItem("Multi Roblox  \xEF\x81\xB1", nullptr, &g_multiRobloxEnabled)) {
@@ -228,13 +244,63 @@ bool RenderMainMenu() {
                 EndPopup();
         }
 
-	if (BeginPopupModal("AddAccountPopup_Browser", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-		Text("Browser-based account addition not yet implemented.");
-		Separator();
-		if (Button("OK", ImVec2(120, 0)))
-			CloseCurrentPopup();
-		EndPopup();
-	}
+        if (BeginPopupModal("AddAccountPopup_Browser", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+                Text("Browser-based account addition not yet implemented.");
+                Separator();
+                if (Button("OK", ImVec2(120, 0)))
+                        CloseCurrentPopup();
+                EndPopup();
+        }
+
+        if (s_openExportPopup) {
+                OpenPopup("ExportBackup");
+                s_openExportPopup = false;
+        }
+
+        if (BeginPopupModal("ExportBackup", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+                InputText("Password", s_password1, IM_ARRAYSIZE(s_password1), ImGuiInputTextFlags_Password);
+                InputText("Confirm", s_password2, IM_ARRAYSIZE(s_password2), ImGuiInputTextFlags_Password);
+                if (Button("Export")) {
+                        if (strcmp(s_password1, s_password2) == 0 && s_password1[0] != '\0') {
+                                if (Backup::Export(s_password1))
+                                        ModalPopup::Add("Backup saved.");
+                                else
+                                        ModalPopup::Add("Backup failed.");
+                                s_password1[0] = s_password2[0] = '\0';
+                                CloseCurrentPopup();
+                        } else {
+                                ModalPopup::Add("Passwords do not match.");
+                        }
+                }
+                SameLine();
+                if (Button("Cancel")) {
+                        CloseCurrentPopup();
+                }
+                EndPopup();
+        }
+
+        if (s_openImportPopup) {
+                OpenPopup("ImportBackup");
+                s_openImportPopup = false;
+        }
+
+        if (BeginPopupModal("ImportBackup", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+                InputText("File", s_importFilePath, IM_ARRAYSIZE(s_importFilePath));
+                InputText("Password", s_importPassword, IM_ARRAYSIZE(s_importPassword), ImGuiInputTextFlags_Password);
+                if (Button("Import")) {
+                        if (Backup::Import(s_importFilePath, s_importPassword))
+                                ModalPopup::Add("Import completed.");
+                        else
+                                ModalPopup::Add("Import failed.");
+                        s_importFilePath[0] = s_importPassword[0] = '\0';
+                        CloseCurrentPopup();
+                }
+                SameLine();
+                if (Button("Cancel")) {
+                        CloseCurrentPopup();
+                }
+                EndPopup();
+        }
 
 	return false;
 }

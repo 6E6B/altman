@@ -54,6 +54,7 @@ set(APP_SRC
         src/components/servers/servers_tab.cpp
         src/components/servers/servers_utils.cpp
         src/components/settings/settings_tab.cpp
+        src/components/backup.cpp
         src/utils/ui/webview.hpp
 )
 

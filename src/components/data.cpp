@@ -445,4 +445,8 @@ namespace Data {
         out << arr.dump(4);
         LOG_INFO("Saved " + std::to_string(logs.size()) + " log entries");
     }
+
+    std::string StorageFilePath(const std::string &filename) {
+        return MakePath(filename);
+    }
 }
