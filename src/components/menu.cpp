@@ -57,10 +57,14 @@ bool RenderMainMenu() {
                                                 auto banStatus = Roblox::refreshBanStatus(acct.cookie);
                                                 if (banStatus == Roblox::BanCheckResult::Banned) {
                                                         acct.status = "Banned";
+                                                        acct.voiceStatus = "N/A";
+                                                        acct.voiceBanExpiry = 0;
                                                         continue;
                                                 }
                                                 if (banStatus == Roblox::BanCheckResult::Terminated) {
                                                         acct.status = "Terminated";
+                                                        acct.voiceStatus = "N/A";
+                                                        acct.voiceBanExpiry = 0;
                                                         continue;
                                                 }
 

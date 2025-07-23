@@ -22,6 +22,8 @@ struct AccountData {
 	std::string note;
 	std::string cookie;
 	bool isFavorite = false;
+	// For InGame status tooltip
+	std::string lastLocation;
 };
 
 struct FavoriteGame {

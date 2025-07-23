@@ -223,23 +223,73 @@ int WINAPI WinMain(
             }
         }
         for (auto &acct: g_accounts) {
-            if (acct.status == "Banned" || acct.status == "Terminated" || acct.userId.empty())
+            if (acct.cookie.empty() && acct.userId.empty())
                 continue;
 
+            bool needsUserInfoUpdate = true;
             uint64_t uid = 0;
-            try {
-                uid = std::stoull(acct.userId);
-                acct.status = Roblox::getPresence(acct.cookie, uid);
-                auto vs = Roblox::getVoiceChatStatus(acct.cookie);
-                acct.voiceStatus = vs.status;
-                acct.voiceBanExpiry = vs.bannedUntil;
-                acct.banExpiry = 0;
-            } catch (const std::exception &e) {
-                char errorMsg[256];
-                snprintf(errorMsg, sizeof(errorMsg), "Error converting userId %s: %s", acct.userId.c_str(),
-                         e.what());
-                LOG_ERROR(errorMsg);
-                acct.status = "Error: Invalid UserID";
+
+            // Try cookie first - it's the most authoritative source
+            if (!acct.cookie.empty()) {
+                auto banInfo = Roblox::checkBanStatus(acct.cookie);
+                if (banInfo.status == Roblox::BanCheckResult::Banned) {
+                    acct.status = "Banned";
+                    acct.banExpiry = banInfo.endDate;
+                    acct.voiceStatus = "N/A";
+                    acct.voiceBanExpiry = 0;
+                    continue;
+                } else if (banInfo.status == Roblox::BanCheckResult::Terminated) {
+                    acct.status = "Terminated";
+                    acct.banExpiry = 0;
+                    acct.voiceStatus = "N/A";
+                    acct.voiceBanExpiry = 0;
+                    continue;
+                } else if (banInfo.status == Roblox::BanCheckResult::Unbanned) {
+                    // Get fresh data from authenticated endpoint
+                    auto userJson = Roblox::getAuthenticatedUser(acct.cookie);
+                    if (!userJson.empty()) {
+                        // Update everything from authenticated data
+                        acct.userId = std::to_string(userJson.value("id", 0ULL));
+                        acct.username = userJson.value("name", "");
+                        acct.displayName = userJson.value("displayName", "");
+                        needsUserInfoUpdate = false;
+
+                        try {
+                            uid = std::stoull(acct.userId);
+                            acct.status = Roblox::getPresence(acct.cookie, uid);
+                            auto vs = Roblox::getVoiceChatStatus(acct.cookie);
+                            acct.voiceStatus = vs.status;
+                            acct.voiceBanExpiry = vs.bannedUntil;
+                            acct.banExpiry = 0;
+                        } catch (const std::exception &e) {
+                            LOG_ERROR("Error getting presence: " + std::string(e.what()));
+                            acct.status = "Error";
+                        }
+                    }
+                }
+            }
+
+            // Fall back to userId if cookie failed or is empty
+            if (needsUserInfoUpdate && !acct.userId.empty()) {
+                try {
+                    uid = std::stoull(acct.userId);
+                    auto userInfo = Roblox::getUserInfo(acct.userId);
+                    if (userInfo.id != 0) {
+                        acct.username = userInfo.username;
+                        acct.displayName = userInfo.displayName;
+                        acct.status = "Cookie Invalid";
+                        acct.voiceStatus = "N/A";
+                        acct.voiceBanExpiry = 0;
+                    } else {
+                        acct.status = "Error: Invalid UserID";
+                    }
+                } catch (const std::exception &e) {
+                    char errorMsg[256];
+                    snprintf(errorMsg, sizeof(errorMsg), "Error converting userId %s: %s", acct.userId.c_str(),
+                             e.what());
+                    LOG_ERROR(errorMsg);
+                    acct.status = "Error: Invalid UserID";
+                }
             }
         }
         Data::SaveAccounts();

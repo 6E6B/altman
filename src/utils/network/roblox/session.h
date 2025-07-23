@@ -47,14 +47,6 @@ namespace Roblox {
 			int typeInt = jsonData.value("userPresenceType", 0);
 			string status = presenceTypeToString(typeInt);
 			
-			// If they're in game, append the location
-			if (status == "InGame") {
-				string lastLocation = jsonData.value("lastLocation", "");
-				if (!lastLocation.empty()) {
-					status += ": " + lastLocation;
-				}
-			}
-			
 			LOG_INFO("Got user presence for " + std::to_string(userId));
 			return status;
 		}
