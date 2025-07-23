@@ -1,3 +1,38 @@
 /.idea
 altman-debug
 altman-release
+
+# Build directories
+/build/
+/out/
+/CMakeFiles/
+/Debug/
+/Release/
+/x64/
+/Win32/
+
+# CMake generated files
+CMakeCache.txt
+CMakeSettings.json
+cmake_install.cmake
+*.dir/
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.sln
+
+# vcpkg files and directories
+/vcpkg_installed/
+.vcpkg-root
+vcpkg.applocal.log
+
+# Compilation database
+compile_commands.json
+
+# Binary files
+*.exe
+*.dll
+*.lib
+*.pdb
+*.ilk
+*.exp
