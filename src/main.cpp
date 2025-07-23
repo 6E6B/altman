@@ -256,7 +256,20 @@ int WINAPI WinMain(
 
                         try {
                             uid = std::stoull(acct.userId);
-                            acct.status = Roblox::getPresence(acct.cookie, uid);
+                            auto presences = Roblox::getPresences({uid}, acct.cookie);
+                            if (!presences.empty()) {
+                                auto it = presences.find(uid);
+                                if (it != presences.end()) {
+                                    acct.status = it->second.presence;
+                                    acct.lastLocation = it->second.lastLocation;
+                                } else {
+                                    acct.status = "Offline";
+                                    acct.lastLocation = "";
+                                }
+                            } else {
+                                acct.status = Roblox::getPresence(acct.cookie, uid);
+                                acct.lastLocation = "";
+                            }
                             auto vs = Roblox::getVoiceChatStatus(acct.cookie);
                             acct.voiceStatus = vs.status;
                             acct.voiceBanExpiry = vs.bannedUntil;
