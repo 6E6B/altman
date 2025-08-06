@@ -74,6 +74,12 @@ bool RenderMainMenu() {
                                                         acct.voiceBanExpiry = 0;
                                                         continue;
                                                 }
+                                                if (banStatus == Roblox::BanCheckResult::Warned) {
+                                                        acct.status = "Warned";
+                                                        acct.voiceStatus = "N/A";
+                                                        acct.voiceBanExpiry = 0;
+                                                        continue;  // Skip processing like banned accounts
+                                                }
                                                 if (banStatus == Roblox::BanCheckResult::Terminated) {
                                                         acct.status = "Terminated";
                                                         acct.voiceStatus = "N/A";

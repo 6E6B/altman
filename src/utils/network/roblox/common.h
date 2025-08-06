@@ -21,6 +21,9 @@ static ImVec4 getStatusColor(std::string statusCode) {
 	if (statusCode == "Banned") {
 		return ImVec4(1.0f, 0.3f, 0.3f, 1.0f);
 	}
+	if (statusCode == "Warned") {
+		return ImVec4(1.0f, 0.8f, 0.3f, 1.0f);  // Orange/yellow for warnings
+	}
 	if (statusCode == "Terminated") {
 		return ImVec4(0.8f, 0.1f, 0.1f, 1.0f);  // Darker red for terminated accounts
 	}

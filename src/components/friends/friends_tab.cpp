@@ -76,7 +76,7 @@ void RenderFriendsTab()
     // Ensure the currently viewed account is valid and not banned.
     auto isCurrentViewAccount = [&](const AccountData &a)
     {
-        return a.id == g_viewAcctId && a.status != "Banned" && a.status != "Terminated";
+        return a.id == g_viewAcctId && a.status != "Banned" && a.status != "Warned" && a.status != "Terminated";
     };
 
     if (g_viewAcctId == -1 || std::none_of(g_accounts.begin(), g_accounts.end(), isCurrentViewAccount))
@@ -86,7 +86,7 @@ void RenderFriendsTab()
         for (int id : g_selectedAccountIds)
         {
             auto itSel = std::find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a)
-                                      { return a.id == id && a.status != "Banned" && a.status != "Terminated"; });
+                                      { return a.id == id && a.status != "Banned" && a.status != "Warned" && a.status != "Terminated"; });
             if (itSel != g_accounts.end())
             {
                 g_viewAcctId = id;
@@ -97,7 +97,7 @@ void RenderFriendsTab()
         if (g_viewAcctId == -1)
         {
             auto itFirst = std::find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a)
-                                        { return a.status != "Banned" && a.status != "Terminated"; });
+                                        { return a.status != "Banned" && a.status != "Warned" && a.status != "Terminated"; });
             if (itFirst != g_accounts.end())
                 g_viewAcctId = itFirst->id;
         }
@@ -138,8 +138,8 @@ void RenderFriendsTab()
         float maxLabelWidth = 0.0f;
         for (const auto &acc : g_accounts)
         {
-            if (acc.status == "Banned" || acc.status == "Terminated")
-                continue; // Skip banned and terminated accounts in the dropdown
+            if (acc.status == "Banned" || acc.status == "Warned" || acc.status == "Terminated")
+                continue; // Skip banned, warned and terminated accounts in the dropdown
             const string &labelStr = acc.displayName.empty() ? acc.username : acc.displayName;
             float w = CalcTextSize(labelStr.c_str()).x;
             if (w > maxLabelWidth)
@@ -157,8 +157,8 @@ void RenderFriendsTab()
         {
             for (const auto &acc : g_accounts)
             {
-                if (acc.status == "Banned" || acc.status == "Terminated")
-                    continue; // Skip banned and terminated accounts in the dropdown
+                if (acc.status == "Banned" || acc.status == "Warned" || acc.status == "Terminated")
+                    continue; // Skip banned, warned and terminated accounts in the dropdown
                 const char *label = acc.displayName.empty() ? acc.username.c_str() : acc.displayName.c_str();
                 bool isSelected = (acc.id == g_viewAcctId);
                 // Push a unique ID for each account item in the dropdown
@@ -310,7 +310,7 @@ void RenderFriendsTab()
                         for (int id : g_selectedAccountIds)
                         {
                             auto itA = find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a)
-                                               { return a.id == id && a.status != "Banned" && a.status != "Terminated"; });
+                                               { return a.id == id && a.status != "Banned" && a.status != "Warned" && a.status != "Terminated"; });
                             if (itA != g_accounts.end())
                                 accounts.emplace_back(itA->id, itA->cookie);
                         }
@@ -631,7 +631,7 @@ void RenderFriendsTab()
                 {
                     auto it = find_if(g_accounts.begin(), g_accounts.end(),
                                       [&](const AccountData &a)
-                                      { return a.id == id && a.status != "Banned" && a.status != "Terminated"; });
+                                      { return a.id == id && a.status != "Banned" && a.status != "Warned" && a.status != "Terminated"; });
                     if (it != g_accounts.end())
                         accounts.emplace_back(it->id, it->cookie);
                 }

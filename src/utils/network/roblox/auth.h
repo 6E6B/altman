@@ -17,12 +17,14 @@ namespace Roblox {
 		InvalidCookie,
 		Unbanned,
 		Banned,
+		Warned,
 		Terminated
 	};
 
 	struct BanInfo {
 		BanCheckResult status = BanCheckResult::InvalidCookie;
 		time_t endDate = 0;
+		uint64_t punishedUserId = 0;  // Extract user ID from moderation response
 	};
 
 	// Cache for ban check results so we don't hit the endpoint repeatedly.
@@ -44,18 +46,25 @@ namespace Roblox {
 		if (j.is_object() && j.contains("punishmentTypeDescription")) {
 			std::string punishmentType = j["punishmentTypeDescription"].get<std::string>();
 			time_t end = 0;
+			uint64_t punishedUserId = j.value("punishedUserId", 0ULL);
 			bool hasEndDate = j.contains("endDate") && j["endDate"].is_string() && !j["endDate"].get<std::string>().
 			                  empty();
 
 			if (hasEndDate) {
 				end = parseIsoTimestamp(j["endDate"].get<std::string>());
+				return {BanCheckResult::Banned, end, punishedUserId};
 			}
 
-			if (punishmentType == "Delete" && !hasEndDate) {
-				return {BanCheckResult::Terminated, 0};
+			if (punishmentType == "Delete") {
+				return {BanCheckResult::Terminated, 0, punishedUserId};
+			}
+			
+			if (punishmentType == "Warn") {
+				return {BanCheckResult::Warned, 0, punishedUserId};
 			}
 
-			return {BanCheckResult::Banned, end};
+			// Default to banned for other punishment types without end date
+			return {BanCheckResult::Banned, 0, punishedUserId};
 		}
 		if (j.empty())
 			return {BanCheckResult::Unbanned, 0};
@@ -94,6 +103,10 @@ namespace Roblox {
 		BanCheckResult status = cachedBanStatus(cookie);
 		if (status == BanCheckResult::Banned) {
 			LOG_ERROR("Skipping request: cookie is banned");
+			return false;
+		}
+		if (status == BanCheckResult::Warned) {
+			LOG_ERROR("Skipping request: cookie is warned");
 			return false;
 		}
 		if (status == BanCheckResult::Terminated) {
