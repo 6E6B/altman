@@ -291,7 +291,7 @@ void RenderServersTab()
                         auto it = find_if(g_accounts.begin(), g_accounts.end(),
                                           [&](const AccountData &a)
                                           { return a.id == id; });
-                        if (it != g_accounts.end() && it->status != "Banned" && it->status != "Terminated")
+                        if (it != g_accounts.end() && it->status != "Banned" && it->status != "Warned" && it->status != "Terminated")
                             accounts.emplace_back(it->id, it->cookie);
                     }
                     if (!accounts.empty())

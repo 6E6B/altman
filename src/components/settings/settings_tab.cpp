@@ -34,7 +34,7 @@ void RenderSettingsTab() {
 
                 int current_default_idx = -1;
                 for (size_t i = 0; i < g_accounts.size(); ++i) {
-                        if (g_accounts[i].status == "Banned" || g_accounts[i].status == "Terminated")
+                        if (g_accounts[i].status == "Banned" || g_accounts[i].status == "Warned" || g_accounts[i].status == "Terminated")
                                 continue; // Skip banned and terminated accounts
 
                         const char *labelPtr = g_accounts[i].displayName.c_str();

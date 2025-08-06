@@ -97,7 +97,7 @@ void RenderAccountsTable(vector<AccountData> &accounts_to_display, const char *t
 			char selectable_label[64];
 			snprintf(selectable_label, sizeof(selectable_label), "##row_selectable_%d", account.id);
 
-			bool banned = account.status == "Banned";
+			bool banned = account.status == "Banned" || account.status == "Warned" || account.status == "Terminated";
 			if (Selectable(
 					selectable_label,
 					is_row_selected,

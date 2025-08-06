@@ -191,7 +191,7 @@ namespace Roblox
 		if (!canUseCookie(cookie))
 		{
 			if (outResponse)
-				*outResponse = "Banned cookie";
+				*outResponse = "Banned/warned cookie";
 			return false;
 		}
 		std::string url = "https://friends.roblox.com/v1/users/" + targetUserId +
@@ -247,7 +247,7 @@ namespace Roblox
 		if (!canUseCookie(cookie))
 		{
 			if (outResponse)
-				*outResponse = "Banned cookie";
+				*outResponse = "Banned/warned cookie";
 			return false;
 		}
 		std::string url = "https://friends.roblox.com/v1/users/" + targetUserId +
@@ -287,7 +287,7 @@ namespace Roblox
 		if (!canUseCookie(cookie))
 		{
 			if (outResponse)
-				*outResponse = "Banned cookie";
+				*outResponse = "Banned/warned cookie";
 			return false;
 		}
 		std::string url = "https://friends.roblox.com/v1/users/" + targetUserId + "/follow";
@@ -319,7 +319,7 @@ namespace Roblox
 		if (!canUseCookie(cookie))
 		{
 			if (outResponse)
-				*outResponse = "Banned cookie";
+				*outResponse = "Banned/warned cookie";
 			return false;
 		}
 		std::string url = "https://friends.roblox.com/v1/users/" + targetUserId + "/unfollow";
@@ -351,7 +351,7 @@ namespace Roblox
 		if (!canUseCookie(cookie))
 		{
 			if (outResponse)
-				*outResponse = "Banned cookie";
+				*outResponse = "Banned/warned cookie";
 			return false;
 		}
 		std::string url = "https://www.roblox.com/users/" + targetUserId + "/block";

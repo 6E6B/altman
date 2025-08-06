@@ -59,14 +59,15 @@ namespace Roblox {
 	};
 
         static VoiceSettings getVoiceChatStatus(const std::string &cookie) {
-                // First check if account is banned/terminated
+                // First check if account is banned/warned/terminated
                 BanCheckResult status = cachedBanStatus(cookie);
                 if (status == BanCheckResult::Banned || 
+                    status == BanCheckResult::Warned ||
                     status == BanCheckResult::Terminated || 
                     status == BanCheckResult::InvalidCookie) {
                     return {"N/A", 0};
                 }
-
+                
                 LOG_INFO("Fetching voice chat settings");
                 auto resp = HttpClient::get(
                         "https://voice.roblox.com/v1/settings",

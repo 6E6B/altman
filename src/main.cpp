@@ -216,6 +216,10 @@ int WINAPI WinMain(
                 acct.status = "Banned";
                 acct.banExpiry = banInfo.endDate;
                 g_selectedAccountIds.erase(acct.id);
+            } else if (banInfo.status == Roblox::BanCheckResult::Warned) {
+                acct.status = "Warned";
+                acct.banExpiry = 0;
+                g_selectedAccountIds.erase(acct.id);  // Remove from selection like banned accounts
             } else if (banInfo.status == Roblox::BanCheckResult::Terminated) {
                 acct.status = "Terminated";
                 acct.banExpiry = 0; // Terminated accounts don't have an end date
@@ -238,6 +242,12 @@ int WINAPI WinMain(
                     acct.voiceStatus = "N/A";
                     acct.voiceBanExpiry = 0;
                     continue;
+                } else if (banInfo.status == Roblox::BanCheckResult::Warned) {
+                    acct.status = "Warned";
+                    acct.banExpiry = 0;
+                    acct.voiceStatus = "N/A";
+                    acct.voiceBanExpiry = 0;
+                    continue;  // Skip processing like banned accounts
                 } else if (banInfo.status == Roblox::BanCheckResult::Terminated) {
                     acct.status = "Terminated";
                     acct.banExpiry = 0;
