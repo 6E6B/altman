@@ -3,6 +3,9 @@
 #include <imgui.h>
 #include <random>
 #include <string>
+#include <string_view>
+#include <cstdint>
+#include <cctype>
 
 
 static ImVec4 getStatusColor(std::string statusCode) {
@@ -74,4 +77,52 @@ static std::string presenceTypeToString(int type) {
 		default:
 			return "Offline";
 	}
+}
+
+struct UserSpecifier {
+	bool isId = false;
+	uint64_t id = 0;
+	std::string username;
+};
+
+static inline std::string_view trim_view(std::string_view s) {
+	size_t b = 0;
+	size_t e = s.size();
+	while (b < e && (s[b] == ' ' || s[b] == '\t' || s[b] == '\n' || s[b] == '\r')) ++b;
+	while (e > b && (s[e - 1] == ' ' || s[e - 1] == '\t' || s[e - 1] == '\n' || s[e - 1] == '\r')) --e;
+	return s.substr(b, e - b);
+}
+
+static inline bool parseUserSpecifier(std::string_view raw, UserSpecifier &out) {
+	std::string_view s = trim_view(raw);
+	if (s.size() >= 3) {
+		char c0 = s[0];
+		char c1 = s[1];
+		char c2 = s[2];
+		if ((c0 == 'i' || c0 == 'I') && (c1 == 'd' || c1 == 'D') && c2 == '=') {
+			std::string_view rest = s.substr(3);
+			if (rest.empty()) return false;
+			uint64_t val = 0;
+			for (char ch : rest) {
+				if (ch < '0' || ch > '9') return false;
+				uint64_t d = static_cast<uint64_t>(ch - '0');
+				uint64_t nv = val * 10 + d;
+				if (nv < val) return false;
+				val = nv;
+			}
+			out.isId = true;
+			out.id = val;
+			out.username.clear();
+			return true;
+		}
+	}
+	if (s.empty()) return false;
+	for (char ch : s) {
+		if (!((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_'))
+			return false;
+	}
+	out.isId = false;
+	out.id = 0;
+	out.username.assign(s.begin(), s.end());
+	return true;
 }

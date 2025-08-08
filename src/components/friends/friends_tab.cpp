@@ -6,6 +6,7 @@
 #include <atomic>
 #include <utility>
 #include <cctype>
+#include <iterator>
 
 #include "../data.h"
 #include "network/roblox.h"
@@ -19,6 +20,12 @@
 
 using namespace ImGui;
 using namespace std;
+
+template <typename Container, typename Pred>
+static inline void erase_if_local(Container &c, Pred p)
+{
+    c.erase(remove_if(c.begin(), c.end(), p), c.end());
+}
 
 static int g_selectedFriendIdx = -1;
 static Roblox::FriendDetail g_selectedFriend;
@@ -42,7 +49,7 @@ static auto ICON_JOIN = "\xEF\x8B\xB6 ";
 static auto ICON_USER_PLUS = "\xEF\x88\xB4 ";
 
 static bool s_openAddFriendPopup = false;
-static char s_addFriendBuffer[64] = "";
+static char s_addFriendBuffer[512] = "";
 static atomic<bool> s_addFriendLoading{false};
 
 static inline string trim_copy(string s)
@@ -52,6 +59,42 @@ static inline string trim_copy(string s)
     if (start == string::npos)
         return "";
     return s.substr(start, end - start + 1);
+}
+
+static inline bool parseMultiUserInput(const string &input, vector<UserSpecifier> &outSpecs, string &error)
+{
+    outSpecs.clear();
+    string s = trim_copy(input);
+    if (s.empty())
+    {
+        // No input: neutral (not valid to send, but not an error)
+        return false;
+    }
+    size_t start = 0;
+    while (start <= s.size())
+    {
+        size_t delim = s.find_first_of(",\n\r", start);
+        string token = delim == string::npos ? s.substr(start) : s.substr(start, delim - start);
+        token = trim_copy(token);
+        if (token.empty())
+        {
+            // Skip empty tokens (e.g., extra commas or spaces)
+            if (delim == string::npos) break;
+            start = delim + 1;
+            continue;
+        }
+        UserSpecifier spec{};
+        if (!parseUserSpecifier(token, spec))
+        {
+            error = "Invalid entry: " + token;
+            return false;
+        }
+        outSpecs.push_back(spec);
+        if (delim == string::npos)
+            break;
+        start = delim + 1;
+    }
+    return !outSpecs.empty();
 }
 
 static const char *presenceIcon(const string &p)
@@ -203,7 +246,7 @@ void RenderFriendsTab()
                              ref(g_friendsLoading));
     }
     SameLine();
-    if (Button((string(ICON_USER_PLUS) + " Add Friend").c_str()))
+    if (Button((string(ICON_USER_PLUS) + " Add Friends").c_str()))
     {
         s_openAddFriendPopup = true;
     }
@@ -211,17 +254,37 @@ void RenderFriendsTab()
 
     if (s_openAddFriendPopup)
     {
-        OpenPopup("Add Friend");
+        OpenPopup("Add Friends");
         s_openAddFriendPopup = false;
     }
-    if (BeginPopupModal("Add Friend", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    if (BeginPopupModal("Add Friends", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
     {
-        float inputW = GetContentRegionAvail().x;
-        if (inputW < 100.0f)
-            inputW = 100.0f;
-        PushItemWidth(inputW);
-        InputTextWithHint("##AddFriendUser", "Username or ID", s_addFriendBuffer, sizeof(s_addFriendBuffer));
-        PopItemWidth();
+    PushTextWrapPos(GetContentRegionAvail().x);
+    TextUnformatted("Enter one or more players, separated by commas or new lines. Each entry can be a username or a userId (formatted as id=000).");
+    PopTextWrapPos();
+    float fieldWidth = GetContentRegionAvail().x;
+    fieldWidth = (fieldWidth < 100.0f) ? 100.0f : fieldWidth;
+    fieldWidth = (fieldWidth < 560.0f) ? 560.0f : fieldWidth; // slightly wider
+    string validateErr;
+    vector<UserSpecifier> specsPreview;
+    string trimmedPreview = trim_copy(s_addFriendBuffer);
+    bool hasAny = !trimmedPreview.empty();
+    bool validNow = parseMultiUserInput(s_addFriendBuffer, specsPreview, validateErr);
+    bool showErr = hasAny && !validNow && !validateErr.empty();
+    if (showErr)
+        {
+            PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+            PushStyleColor(ImGuiCol_Border, ImVec4(1.0f, 0.2f, 0.2f, 1.0f));
+        }
+        {
+            ImVec2 size(fieldWidth, GetTextLineHeight() * 5.0f + GetStyle().FramePadding.y * 2.0f);
+            InputTextMultiline("##AddFriendUser", s_addFriendBuffer, sizeof(s_addFriendBuffer), size, ImGuiInputTextFlags_NoHorizontalScroll);
+        }
+    if (showErr)
+        {
+            PopStyleColor();
+            PopStyleVar();
+        }
         if (s_addFriendLoading.load())
         {
             SameLine();
@@ -230,28 +293,32 @@ void RenderFriendsTab()
         Spacing();
         float sendWidth = CalcTextSize("Send").x + GetStyle().FramePadding.x * 2.0f;
         float cancelWidth = CalcTextSize("Cancel").x + GetStyle().FramePadding.x * 2.0f;
-        if (Button("Send", ImVec2(sendWidth, 0)) && s_addFriendBuffer[0] != '\0' && !s_addFriendLoading.load())
+    BeginDisabled(!validNow || specsPreview.empty() || s_addFriendLoading.load());
+        bool doSend = Button("Send", ImVec2(sendWidth, 0));
+        EndDisabled();
+        if (doSend)
         {
             string input = trim_copy(s_addFriendBuffer);
             s_addFriendLoading = true;
-            Threading::newThread([input, cookie = acct.cookie]()
+            vector<UserSpecifier> specs;
+            string errTmp;
+            (void)parseMultiUserInput(input, specs, errTmp);
+            Threading::newThread([specs, cookie = acct.cookie]()
                                  {
                 try {
-                    uint64_t uid = 0;
-                    if (input.empty()) throw runtime_error("Username not provided");
-                    if (all_of(input.begin(), input.end(), [](unsigned char c) { return std::isdigit(c); })) {
-                        uid = stoull(input);
-                    } else {
-                        uid = Roblox::getUserIdFromUsername(input);
-                    }
-                    string resp;
-                    bool ok = Roblox::sendFriendRequest(to_string(uid), cookie, &resp);
-                    if (ok) {
-                        LOG_INFO("Friend request sent");
-                        cerr << "Friend request response: " << resp << "\n";
-                    } else {
-                        cerr << "Friend request failed: " << resp << "\n";
-                        LOG_INFO("Friend request failed");
+                    int sent = 0;
+                    for (const auto &sp : specs) {
+                        uint64_t uid = sp.isId ? sp.id : Roblox::getUserIdFromUsername(sp.username);
+                        string resp;
+                        bool ok = Roblox::sendFriendRequest(to_string(uid), cookie, &resp);
+                        if (ok) {
+                            ++sent;
+                            LOG_INFO("Friend request sent");
+                            cerr << "Friend request response: " << resp << "\n";
+                        } else {
+                            cerr << "Friend request failed: " << resp << "\n";
+                            LOG_INFO("Friend request failed");
+                        }
                     }
                 } catch (const exception &e) {
                     cerr << "Friend request exception: " << e.what() << "\n";
@@ -388,7 +455,7 @@ void RenderFriendsTab()
                             string resp;
                             bool ok = Roblox::unfriend(to_string(friendId), cookieCopy, &resp);
                             if (ok) {
-                                erase_if(g_friends, [&](const FriendInfo &fi) {
+                                erase_if_local(g_friends, [&](const FriendInfo &fi) {
                                     return fi.id == friendId;
                                 });
                                 if (g_selectedFriendIdx >= 0 && g_selectedFriendIdx < static_cast<int>
@@ -398,7 +465,7 @@ void RenderFriendsTab()
                                     g_selectedFriendIdx = -1;
                                     g_selectedFriend = {};
                                 }
-                                erase_if(g_accountFriends[acctIdCopy], [&](const FriendInfo &fi) {
+                                erase_if_local(g_accountFriends[acctIdCopy], [&](const FriendInfo &fi) {
                                     return fi.id == friendId;
                                 });
                                 auto &unfList = g_unfriendedFriends[acctIdCopy];
