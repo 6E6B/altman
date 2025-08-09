@@ -272,13 +272,19 @@ int WINAPI WinMain(
                                 if (it != presences.end()) {
                                     acct.status = it->second.presence;
                                     acct.lastLocation = it->second.lastLocation;
+                                    acct.placeId = it->second.placeId;
+                                    acct.jobId = it->second.gameId;
                                 } else {
                                     acct.status = "Offline";
                                     acct.lastLocation = "";
+                                    acct.placeId = 0;
+                                    acct.jobId.clear();
                                 }
                             } else {
                                 acct.status = Roblox::getPresence(acct.cookie, uid);
                                 acct.lastLocation = "";
+                                acct.placeId = 0;
+                                acct.jobId.clear();
                             }
                             auto vs = Roblox::getVoiceChatStatus(acct.cookie);
                             acct.voiceStatus = vs.status;

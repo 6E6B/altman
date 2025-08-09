@@ -392,13 +392,13 @@ void RenderFriendsTab()
                     string idStr = to_string(f.id);
                     SetClipboardText(idStr.c_str());
                 }
-                bool inGame = f.presence == "InGame" && f.placeId && !f.gameId.empty();
+                bool inGame = f.presence == "InGame" && f.placeId && !f.jobId.empty();
                 if (inGame)
                 {
                     Separator();
                     StandardJoinMenuParams menu{};
                     menu.placeId = f.placeId;
-                    menu.jobId = f.gameId;
+                    menu.jobId = f.jobId;
                     menu.onLaunchGame = [pid = f.placeId]() {
                         if (g_selectedAccountIds.empty()) return;
                         vector<pair<int, string>> accounts;
@@ -415,10 +415,10 @@ void RenderFriendsTab()
                             auto itA = find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a) { return a.id == id && AccountFilters::IsAccountUsable(a); });
                             if (itA != g_accounts.end()) accounts.emplace_back(itA->id, itA->cookie);
                         }
-                        if (!accounts.empty()) Threading::newThread([row, accounts]() { launchRobloxSequential(row.placeId, row.gameId, accounts); });
+                        if (!accounts.empty()) Threading::newThread([row, accounts]() { launchRobloxSequential(row.placeId, row.jobId, accounts); });
                     };
                     menu.onFillGame = [pid = f.placeId]() { FillJoinOptions(pid, ""); };
-                    menu.onFillInstance = [row = f]() { FillJoinOptions(row.placeId, row.gameId); };
+                    menu.onFillInstance = [row = f]() { FillJoinOptions(row.placeId, row.jobId); };
                     RenderStandardJoinMenu(menu);
                 }
                 Separator();
@@ -686,7 +686,7 @@ void RenderFriendsTab()
             Indent(desiredTextIndent / 2);
             const FriendInfo &row = g_friends[g_selectedFriendIdx];
 
-            bool canJoin = (row.presence == "InGame" && row.placeId && !row.gameId.empty());
+            bool canJoin = (row.presence == "InGame" && row.placeId && !row.jobId.empty());
             BeginDisabled(!canJoin);
             if (Button((string(ICON_JOIN) + " Join Game").c_str()) && canJoin)
             {
@@ -702,7 +702,7 @@ void RenderFriendsTab()
                 if (!accounts.empty())
                 {
                     Threading::newThread([row, accounts]()
-                                         { launchRobloxSequential(row.placeId, row.gameId, accounts); });
+                                         { launchRobloxSequential(row.placeId, row.jobId, accounts); });
                 }
             }
             EndDisabled();

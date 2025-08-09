@@ -89,10 +89,27 @@ bool RenderMainMenu() {
                                                 }
 
 						if (!acct.userId.empty()) {
-							acct.status = Roblox::getPresence(acct.cookie, stoull(acct.userId));
-							auto vs = Roblox::getVoiceChatStatus(acct.cookie);
-							acct.voiceStatus = vs.status;
-							acct.voiceBanExpiry = vs.bannedUntil;
+							try {
+								uint64_t uid = stoull(acct.userId);
+								auto pres = Roblox::getPresences({uid}, acct.cookie);
+								auto it = pres.find(uid);
+								if (it != pres.end()) {
+									acct.status = it->second.presence;
+									acct.lastLocation = it->second.lastLocation;
+									acct.placeId = it->second.placeId;
+									acct.jobId = it->second.gameId; // API uses gameId, we store as jobId
+								} else {
+									acct.status = Roblox::getPresence(acct.cookie, uid);
+									acct.lastLocation.clear();
+									acct.placeId = 0;
+									acct.jobId.clear();
+								}
+								auto vs = Roblox::getVoiceChatStatus(acct.cookie);
+								acct.voiceStatus = vs.status;
+								acct.voiceBanExpiry = vs.bannedUntil;
+							} catch (...) {
+								// leave as-is on error
+							}
 						}
 					}
 					Data::SaveAccounts();

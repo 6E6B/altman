@@ -24,6 +24,9 @@ struct AccountData {
 	bool isFavorite = false;
 	// For InGame status tooltip
 	std::string lastLocation;
+	// Cached presence details for join menu
+	uint64_t placeId = 0;
+	std::string jobId;
 };
 
 struct FavoriteGame {
@@ -40,7 +43,7 @@ struct FriendInfo {
 	std::string presence;
 	std::string lastLocation;
 	uint64_t placeId = 0;
-	std::string gameId;
+	std::string jobId;
 };
 
 extern std::vector<FavoriteGame> g_favorites;

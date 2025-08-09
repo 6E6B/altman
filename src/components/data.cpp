@@ -134,6 +134,11 @@ namespace Data {
             account.banExpiry = item.value("banExpiry", 0);
             account.note = item.value("note", "");
             account.isFavorite = item.value("isFavorite", false);
+            account.lastLocation = item.value("lastLocation", "");
+            account.placeId = item.value("placeId", 0ULL);
+            // Read new key 'jobId' with fallback to legacy 'gameId'
+            if (item.contains("jobId")) account.jobId = item.value("jobId", "");
+            else account.jobId = item.value("gameId", "");
 
             if (item.contains("encryptedCookie")) {
                 string b64EncryptedCookie = item.value("encryptedCookie", "");
@@ -201,7 +206,10 @@ namespace Data {
                 {"banExpiry", account.banExpiry},
                 {"note", account.note},
                 {"encryptedCookie", b64EncryptedCookie},
-                {"isFavorite", account.isFavorite}
+                {"isFavorite", account.isFavorite},
+                {"lastLocation", account.lastLocation},
+                {"placeId", account.placeId},
+                {"jobId", account.jobId}
             });
         }
         out << dataArray.dump(4);

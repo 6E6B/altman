@@ -59,7 +59,7 @@ namespace FriendsActions {
                 it->presence = pdata.presence;
                 it->lastLocation = pdata.lastLocation;
                 it->placeId = pdata.placeId;
-                it->gameId = pdata.gameId;
+                it->jobId = pdata.gameId; // API names it gameId
             }
         }
 
