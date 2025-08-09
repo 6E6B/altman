@@ -1,16 +1,13 @@
 {
-  "name": "altman",
-  "version-string": "0.1.0",
-  "dependencies": [
-    "cpr",
-    "nlohmann-json",
-    "webview2",
-    {
-      "name": "imgui",
-      "features": [
-        "win32-binding",
-        "dx11-binding"
-      ]
-    }
-  ]
+	"name": "altman",
+	"version-string": "0.1.0",
+	"dependencies": [
+		"cpr",
+		"nlohmann-json",
+		"webview2",
+		{
+			"name": "imgui",
+			"features": ["win32-binding", "dx11-binding"]
+		}
+	]
 }
