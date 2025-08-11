@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <atomic>
+#include <mutex>
 #include <utility>
 #include <cctype>
 #include <iterator>
@@ -40,6 +41,44 @@ static int g_lastAcctIdForFriends = -1;
 // Account whose friends list is currently being viewed. Defaults to the first
 // selected account but can be changed via the UI combo box.
 static int g_viewAcctId = -1;
+
+// Friends tab view mode: 0 = Friends, 1 = Requests
+static int g_friendsViewMode = 0;
+static vector<Roblox::IncomingFriendRequest> g_incomingRequests;
+static string g_incomingReqNextCursor;
+static atomic<bool> g_incomingRequestsLoading{false};
+static std::mutex g_incomingReqMutex; // protects g_incomingRequests and g_incomingReqNextCursor
+static int g_lastViewMode = -1;
+static int g_selectedRequestIdx = -1;
+static Roblox::FriendDetail g_selectedRequestDetail;
+static atomic<bool> g_requestDetailsLoading{false};
+
+static inline void LoadIncomingRequests(const string &cookie, bool reset)
+{
+    if (g_incomingRequestsLoading.load()) return;
+    if (reset) {
+        std::lock_guard<std::mutex> lk(g_incomingReqMutex);
+        g_incomingRequests.clear();
+        g_incomingReqNextCursor.clear();
+    }
+    g_incomingRequestsLoading = true;
+    string cursor;
+    if (reset) {
+        cursor = "";
+    } else {
+        std::lock_guard<std::mutex> lk(g_incomingReqMutex);
+        cursor = g_incomingReqNextCursor;
+    }
+    Threading::newThread([cookie, cursor]() {
+        auto page = Roblox::getIncomingFriendRequests(cookie, cursor, 100);
+        {
+            std::lock_guard<std::mutex> lk(g_incomingReqMutex);
+            for (auto &r : page.data) g_incomingRequests.push_back(std::move(r));
+            g_incomingReqNextCursor = page.nextCursor;
+        }
+        g_incomingRequestsLoading = false;
+    });
+}
 
 static auto ICON_TOOL = "\xEF\x82\xAD ";
 static auto ICON_PERSON = "\xEF\x80\x87 ";
@@ -171,12 +210,23 @@ void RenderFriendsTab()
         g_friendDetailsLoading = false;
         g_unfriended = g_unfriendedFriends[currentAcctId];
         g_lastAcctIdForFriends = currentAcctId;
+        {
+            std::lock_guard<std::mutex> lk(g_incomingReqMutex);
+            g_incomingRequests.clear();
+            g_incomingReqNextCursor.clear();
+        }
+        g_incomingRequestsLoading = false;
+    g_selectedRequestIdx = -1;
+    g_selectedRequestDetail = {};
+    g_requestDetailsLoading = false;
 
         if (!acct.userId.empty())
         {
             Threading::newThread(FriendsActions::RefreshFullFriendsList, acct.id, acct.userId, acct.cookie,
                                  ref(g_friends),
                                  ref(g_friendsLoading));
+            if (g_friendsViewMode == 1)
+                LoadIncomingRequests(acct.cookie, true);
         }
     }
     {
@@ -241,13 +291,40 @@ void RenderFriendsTab()
 
     SameLine();
 
-    BeginDisabled(g_friendsLoading.load());
+    // Friends | Requests selector next to account selection
+    {
+        static const char* kViewModes[] = {"Friends", "Requests"};
+        ImGuiStyle &style2 = GetStyle();
+        float maxModeLabel = 0.0f;
+        for (int i = 0; i < IM_ARRAYSIZE(kViewModes); ++i) {
+            float w = CalcTextSize(kViewModes[i]).x;
+            if (w > maxModeLabel) maxModeLabel = w;
+        }
+        float modeComboWidth = maxModeLabel + style2.FramePadding.x * 2.0f + GetFrameHeight();
+        SetNextItemWidth(modeComboWidth);
+        Combo("##FriendsViewMode", &g_friendsViewMode, kViewModes, IM_ARRAYSIZE(kViewModes));
+        if (g_lastViewMode != g_friendsViewMode) {
+            g_lastViewMode = g_friendsViewMode;
+            g_selectedFriendIdx = -1;
+            g_selectedFriend = {};
+            g_selectedRequestIdx = -1;
+            if (g_friendsViewMode == 1) {
+                LoadIncomingRequests(acct.cookie, true);
+            }
+        }
+    }
+
+    BeginDisabled(g_friendsLoading.load() || (g_friendsViewMode == 1 && g_incomingRequestsLoading.load()));
     if (Button((string(ICON_REFRESH) + " Refresh").c_str()) && !acct.userId.empty())
     {
         g_selectedFriendIdx = -1;
         g_selectedFriend = {};
-        Threading::newThread(FriendsActions::RefreshFullFriendsList, acct.id, acct.userId, acct.cookie, ref(g_friends),
-                             ref(g_friendsLoading));
+        if (g_friendsViewMode == 0) {
+            Threading::newThread(FriendsActions::RefreshFullFriendsList, acct.id, acct.userId, acct.cookie, ref(g_friends),
+                                 ref(g_friendsLoading));
+        } else {
+            LoadIncomingRequests(acct.cookie, true);
+        }
     }
     SameLine();
     if (Button((string(ICON_USER_PLUS) + " Add Friends").c_str()))
@@ -340,6 +417,263 @@ void RenderFriendsTab()
             CloseCurrentPopup();
         }
         EndPopup();
+    }
+
+    // Below: the two-pane content area
+
+    // If Requests view, render requests list with pagination and a details panel.
+    if (g_friendsViewMode == 1) {
+        float availW = GetContentRegionAvail().x;
+        float minSide = GetFontSize() * 14.0f;
+        float maxSide = GetFontSize() * 20.0f;
+        float listWidth = availW * 0.28f;
+        if (listWidth < minSide) listWidth = minSide;
+        if (listWidth > maxSide) listWidth = maxSide;
+
+        BeginChild("##RequestsList", ImVec2(listWidth, 0), true);
+        // Take a snapshot to render safely without holding the mutex during ImGui calls
+        vector<Roblox::IncomingFriendRequest> reqsSnapshot;
+        string nextCursorSnapshot;
+        {
+            std::lock_guard<std::mutex> lk(g_incomingReqMutex);
+            reqsSnapshot = g_incomingRequests;
+            nextCursorSnapshot = g_incomingReqNextCursor;
+        }
+        if (g_incomingRequestsLoading.load() && reqsSnapshot.empty()) {
+            TextUnformatted("Loading requests...");
+        } else {
+            for (size_t i = 0; i < reqsSnapshot.size(); ++i) {
+                const auto &r = reqsSnapshot[i];
+                string header = r.displayName.empty() || r.displayName == r.username
+                                ? r.username
+                                : r.displayName + " (" + r.username + ")";
+                PushID(static_cast<int>(i));
+                bool clicked = Selectable(header.c_str(), g_selectedRequestIdx == static_cast<int>(i), ImGuiSelectableFlags_SpanAllColumns);
+                // Attach the context menu to the selectable row immediately
+                if (BeginPopupContextItem("RequestRowContextMenu")) {
+                    if (MenuItem("Copy Display Name")) { SetClipboardText(r.displayName.c_str()); }
+                    if (MenuItem("Copy Username")) { SetClipboardText(r.username.c_str()); }
+                    if (MenuItem("Copy User ID")) { string idStr = to_string(r.userId); SetClipboardText(idStr.c_str()); }
+                    Separator();
+                    PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.85f, 0.4f, 1.f));
+                    if (MenuItem("Accept Request")) {
+                        uint64_t uid = r.userId;
+                        string cookieCopy = acct.cookie;
+                        Threading::newThread([uid, cookieCopy]() {
+                            string resp;
+                            bool ok = Roblox::acceptFriendRequest(to_string(uid), cookieCopy, &resp);
+                            if (ok) {
+                                std::lock_guard<std::mutex> lk(g_incomingReqMutex);
+                                erase_if_local(g_incomingRequests, [&](const Roblox::IncomingFriendRequest &x){ return x.userId == uid; });
+                                if (g_selectedRequestIdx >= 0 && g_selectedRequestIdx < (int)g_incomingRequests.size()) {
+                                    if (g_incomingRequests[g_selectedRequestIdx].userId == uid) g_selectedRequestIdx = -1;
+                                } else {
+                                    g_selectedRequestIdx = -1;
+                                }
+                            } else {
+                                cerr << "Accept request failed: " << resp << "\n";
+                            }
+                        });
+                    }
+                    PopStyleColor();
+                    EndPopup();
+                }
+                // Relative time line under the name
+                if (!r.sentAt.empty()) {
+                    ImGuiStyle &st = GetStyle();
+                    const float indent = st.FramePadding.x * 2.0f;
+                    Indent(indent);
+                    // We have a helper that returns "YYYY-MM-DD, hh:mm AM (x ago)"; we need just the relative part for the line,
+                    // but we can reuse the whole string as hover text and display a trimmed relative part visually.
+                    string pretty = formatPrettyDate(r.sentAt);
+                    size_t open = pretty.rfind('(');
+                    size_t close = pretty.rfind(')');
+                    string relative;
+                    if (open != string::npos && close != string::npos && close > open + 1) {
+                        relative = pretty.substr(open + 1, close - open - 1);
+                    }
+                    if (relative.empty()) relative = "just now";
+                    TextDisabled("%s", relative.c_str());
+                    if (IsItemHovered()) SetTooltip("%s", pretty.c_str());
+                    Unindent(indent);
+                }
+
+                if (clicked) {
+                    g_selectedRequestIdx = static_cast<int>(i);
+                    if (g_selectedRequestDetail.id != r.userId) {
+                        g_selectedRequestDetail = {};
+                        Threading::newThread(FriendsActions::FetchFriendDetails,
+                                             to_string(r.userId),
+                                             acct.cookie,
+                                             ref(g_selectedRequestDetail),
+                                             ref(g_requestDetailsLoading));
+                    }
+                }
+
+                PopID();
+            }
+            if (!nextCursorSnapshot.empty()) {
+                Spacing();
+                BeginDisabled(g_incomingRequestsLoading.load());
+                if (Button("Load More")) LoadIncomingRequests(acct.cookie, false);
+                EndDisabled();
+            }
+        }
+        EndChild();
+
+        SameLine();
+
+        float desiredTextIndent = 8.0f;
+        PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+        BeginChild("##RequestDetails", ImVec2(0, 0), true);
+        PopStyleVar();
+        Indent(desiredTextIndent);
+        Spacing();
+        // Re-evaluate selection bounds against a current snapshot
+        bool selectionValid = false;
+        Roblox::IncomingFriendRequest selReq{};
+        {
+            std::lock_guard<std::mutex> lk(g_incomingReqMutex);
+            selectionValid = (g_selectedRequestIdx >= 0 && g_selectedRequestIdx < (int)g_incomingRequests.size());
+            if (selectionValid) selReq = g_incomingRequests[g_selectedRequestIdx];
+        }
+        if (!selectionValid) {
+            TextWrapped("Incoming friend requests. Use Refresh to reload, or Load More to paginate.");
+        } else if (g_requestDetailsLoading.load()) {
+            TextUnformatted("Loading full details...");
+        } else {
+            const auto &sel = selReq;
+            const auto &D = g_selectedRequestDetail;
+
+            ImGuiTableFlags tableFlags = ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit;
+            PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(0.0f, 4.0f));
+            if (BeginTable("RequestInfoTable", 2, tableFlags)) {
+                TableSetupColumn("##reqlabel", ImGuiTableColumnFlags_WidthFixed, GetFontSize() * 7.5f);
+                TableSetupColumn("##reqvalue", ImGuiTableColumnFlags_WidthStretch);
+
+                auto addRow = [&](const char *label, const string &value, bool wrapped=false){
+                    TableNextRow();
+                    TableSetColumnIndex(0);
+                    Indent(desiredTextIndent);
+                    Spacing();
+                    TextUnformatted(label);
+                    Spacing();
+                    Unindent(desiredTextIndent);
+                    TableSetColumnIndex(1);
+                    Indent(desiredTextIndent);
+                    Spacing();
+                    PushID(label);
+                    if (wrapped) TextWrapped("%s", value.c_str()); else TextUnformatted(value.c_str());
+                    if (BeginPopupContextItem("CopyReqValue")) { if (MenuItem("Copy")) { SetClipboardText(value.c_str()); } EndPopup(); }
+                    PopID();
+                    Spacing();
+                    Unindent(desiredTextIndent);
+                };
+                auto addRowInt = [&](const char *label, int v){ addRow(label, to_string(v)); };
+
+                addRow("User ID:", to_string(D.id ? D.id : sel.userId));
+                addRow("Username:", !D.username.empty() ? D.username : sel.username);
+                addRow("Display Name:", !D.displayName.empty() ? D.displayName : (sel.displayName.empty()? sel.username : sel.displayName));
+                if (D.followers) addRowInt("Followers:", D.followers);
+                if (D.friends) addRowInt("Friends:", D.friends);
+                if (D.following) addRowInt("Following:", D.following);
+                if (!D.createdIso.empty()) addRow("Created:", formatPrettyDate(D.createdIso));
+                if (!sel.sentAt.empty()) addRow("Request Sent:", formatPrettyDate(sel.sentAt));
+                if (!sel.originSourceType.empty()) addRow("Source Type:", sel.originSourceType);
+                if (sel.sourceUniverseId) addRow("Source Universe ID:", to_string(sel.sourceUniverseId));
+
+                // Mutual Friends above Description
+                TableNextRow();
+                TableSetColumnIndex(0);
+                Indent(desiredTextIndent);
+                Spacing();
+                TextUnformatted("Mutual Friends:");
+                Spacing();
+                Unindent(desiredTextIndent);
+                TableSetColumnIndex(1);
+                Indent(desiredTextIndent);
+                Spacing();
+                if (sel.mutuals.empty()) {
+                    TextDisabled("No mutual friends");
+                } else {
+                    for (const auto &m : sel.mutuals) BulletText("%s", m.c_str());
+                }
+                Spacing();
+                Unindent(desiredTextIndent);
+
+                TableNextRow();
+                TableSetColumnIndex(0);
+                Indent(desiredTextIndent);
+                Spacing();
+                TextUnformatted("Description:");
+                Spacing();
+                Unindent(desiredTextIndent);
+
+                TableSetColumnIndex(1);
+                Indent(desiredTextIndent);
+                Spacing();
+
+                ImGuiStyle &style = GetStyle();
+                float spaceForButtons = GetFrameHeightWithSpacing();
+                float reservedHeightBelow = style.ItemSpacing.y + style.ItemSpacing.y + spaceForButtons;
+                float descChildHeight = GetContentRegionAvail().y - reservedHeightBelow;
+                float minDescHeight = GetTextLineHeightWithSpacing() * 3.0f;
+                if (descChildHeight < minDescHeight) descChildHeight = minDescHeight;
+                const string descStr = D.description.empty() ? "(No description)" : D.description;
+                PushID("ReqDesc");
+                BeginChild("##ReqDescScroll", ImVec2(0, descChildHeight - 4), false, ImGuiWindowFlags_HorizontalScrollbar);
+                TextWrapped("%s", descStr.c_str());
+                if (BeginPopupContextItem("CopyReqDesc")) { if (MenuItem("Copy")) { SetClipboardText(descStr.c_str()); } EndPopup(); }
+                EndChild();
+                PopID();
+
+                Spacing();
+                Unindent(desiredTextIndent);
+
+                EndTable();
+            }
+            PopStyleVar();
+
+            Separator();
+            // Open Page button (1:1 with Friends)
+            Indent(desiredTextIndent / 2);
+            bool openProfile = Button((string(ICON_OPEN_LINK) + " Open Page").c_str());
+            if (openProfile)
+                OpenPopup("ProfileContext");
+            OpenPopupOnItemClick("ProfileContext");
+            if (BeginPopup("ProfileContext"))
+            {
+                string primaryCookie;
+                string primaryUserId;
+                if (!g_selectedAccountIds.empty()) {
+                    auto primaryId = *g_selectedAccountIds.begin();
+                    auto itp = find_if(g_accounts.begin(), g_accounts.end(),
+                        [primaryId](const AccountData &a) { return a.id == primaryId; });
+                    if (itp != g_accounts.end()) { primaryCookie = itp->cookie; primaryUserId = itp->userId; }
+                }
+                const uint64_t uid = D.id ? D.id : sel.userId;
+                if (MenuItem("Profile"))
+                    if (uid)
+                        LaunchWebview("https://www.roblox.com/users/" + to_string(uid) + "/profile",
+                                      "Roblox Profile", primaryCookie, primaryUserId);
+                if (MenuItem("Friends"))
+                    LaunchWebview("https://www.roblox.com/users/" + to_string(uid) + "/friends", "Friends",
+                                  primaryCookie, primaryUserId);
+                if (MenuItem("Favorites"))
+                    LaunchWebview("https://www.roblox.com/users/" + to_string(uid) + "/favorites", "Favorites",
+                                  primaryCookie, primaryUserId);
+                if (MenuItem("Inventory"))
+                    LaunchWebview("https://www.roblox.com/users/" + to_string(uid) + "/inventory/#!/accessories",
+                                  "Inventory", primaryCookie, primaryUserId);
+                if (MenuItem("Rolimons"))
+                    LaunchWebview("https://www.rolimons.com/player/" + to_string(uid), "Rolimons");
+                EndPopup();
+            }
+            Unindent(desiredTextIndent / 2);
+        }
+        Unindent(desiredTextIndent);
+        EndChild();
+        return;
     }
 
     float availW = GetContentRegionAvail().x;
@@ -661,9 +995,10 @@ void RenderFriendsTab()
                 addFriendDataRow("User ID:", to_string(D.id));
                 addFriendDataRow("Username:", D.username);
                 addFriendDataRow("Display Name:", D.displayName.empty() ? D.username : D.displayName);
-                addFriendDataRow("Created:", formatPrettyDate(D.createdIso));
+                addFriendDataRowInt("Friends:", D.friends);
                 addFriendDataRowInt("Followers:", D.followers);
                 addFriendDataRowInt("Following:", D.following);
+                addFriendDataRow("Created:", formatPrettyDate(D.createdIso));
 
                 TableNextRow();
                 TableSetColumnIndex(0);
