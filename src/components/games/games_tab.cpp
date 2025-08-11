@@ -373,17 +373,22 @@ static void RenderGameDetailsPanel(float panelWidth, float availableHeight) {
                                      ImGuiTableFlags_SizingFixedFit;
 
         PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(0.0f, 4.0f));
-        // Compute label column width based on rows that will render for this game
-        float gameLabelColumnWidth = GetFontSize() * 8.75f; // sensible minimum
+        float gameLabelColumnWidth = GetFontSize() * 8.75f;
         {
             vector<const char*> labels;
             labels.push_back("Name:");
             labels.push_back("Place ID:");
             labels.push_back("Universe ID:");
             labels.push_back("Creator:");
+            labels.push_back("Creator ID:");
+            labels.push_back("Creator Type:");
             labels.push_back("Players:");
-            labels.push_back("Max Players:");
             labels.push_back("Visits:");
+            labels.push_back("Favorites:");
+            labels.push_back("Max Players:");
+            labels.push_back("Price:");
+            labels.push_back("Created:");
+            labels.push_back("Updated:");
             labels.push_back("Genre:");
             if (serverCount > 0) labels.push_back("Est. Servers:");
             float mx = 0.0f;
@@ -433,10 +438,31 @@ static void RenderGameDetailsPanel(float panelWidth, float availableHeight) {
                    detailInfo.creatorName +
                    string(detailInfo.creatorVerified ? " \xEF\x80\x8C" : ""),
                    detailInfo.creatorVerified ? &verifiedColor : nullptr);
-            addRow("Players:", formatWithCommas(gameInfo.playerCount));
-            addRow("Max Players:", formatWithCommas(detailInfo.maxPlayers));
+            addRow("Creator ID:", to_string(detailInfo.creatorId));
+            addRow("Creator Type:", detailInfo.creatorType.empty() ? string("Unknown") : detailInfo.creatorType);
+            int playersNow = detailInfo.playing > 0 ? detailInfo.playing : gameInfo.playerCount;
+            addRow("Players:", formatWithCommas(playersNow));
             addRow("Visits:", formatWithCommas(detailInfo.visits));
-            addRow("Genre:", detailInfo.genre);
+            addRow("Favorites:", formatWithCommas(detailInfo.favorites));
+            addRow("Max Players:", formatWithCommas(detailInfo.maxPlayers));
+            {
+                string priceStr = (detailInfo.priceRobux >= 0) ? (formatWithCommas(detailInfo.priceRobux)) + string(" R$") : string("0 R$");
+                addRow("Price:", priceStr);
+            }
+            addRow("Created:", formatAbsoluteWithRelativeFromIso(detailInfo.createdIso));
+            addRow("Updated:", formatAbsoluteWithRelativeFromIso(detailInfo.updatedIso));
+            {
+                string genreCombined = detailInfo.genre;
+                if (!detailInfo.genreL1.empty()) {
+                    if (!genreCombined.empty()) genreCombined += ", ";
+                    genreCombined += detailInfo.genreL1;
+                }
+                if (!detailInfo.genreL2.empty()) {
+                    if (!genreCombined.empty()) genreCombined += ", ";
+                    genreCombined += detailInfo.genreL2;
+                }
+                addRow("Genre:", genreCombined);
+            }
             if (serverCount > 0)
                 addRow("Est. Servers:", formatWithCommas(serverCount));
 

@@ -15,15 +15,22 @@ namespace Roblox {
         struct GameDetail {
                 std::string name;
                 std::string genre;
-		std::string description;
-		uint64_t visits = 0;
-		int maxPlayers = 0;
-		std::string createdIso;
-		std::string updatedIso;
+                std::string genreL1;
+                std::string genreL2;
+                std::string description;
+                uint64_t visits = 0;
+                uint64_t favorites = 0;
+                int playing = 0;
+                int maxPlayers = 0;
+                int priceRobux = -1; // -1 when price is null/unknown
+                std::string createdIso;
+                std::string updatedIso;
 
-		std::string creatorName;
-		bool creatorVerified = false;
-	};
+                std::string creatorName;
+                uint64_t creatorId = 0;
+                std::string creatorType;
+                bool creatorVerified = false;
+        };
 
 	inline GameDetail getGameDetail(uint64_t universeId) {
 		using nlohmann::json;
@@ -41,17 +48,29 @@ namespace Roblox {
 			json root = json::parse(resp.text);
 			if (root.contains("data") && root["data"].is_array() && !root["data"].empty()) {
 				const auto &j = root["data"][0];
-                                d.name = j.value("name", "");
-                                d.genre = j.value("genre", "");
-				d.description = j.value("description", "");
-				d.visits = j.value("visits", 0ULL);
-				d.maxPlayers = j.value("maxPlayers", 0);
-				d.createdIso = j.value("created", "");
-				d.updatedIso = j.value("updated", "");
+                        d.name = j.value("name", "");
+                        d.genre = j.value("genre", "");
+                        d.genreL1 = j.value("genre_l1", "");
+                        d.genreL2 = j.value("genre_l2", "");
+                        d.description = j.value("description", "");
+                        d.visits = j.value("visits", 0ULL);
+                        d.favorites = j.value("favoritedCount", 0ULL);
+                        d.playing = j.value("playing", 0);
+                        d.maxPlayers = j.value("maxPlayers", 0);
+                        // price can be null; handle as -1 when not present
+                        if (j.contains("price") && !j["price"].is_null()) {
+                                d.priceRobux = j["price"].get<int>();
+                        } else {
+                                d.priceRobux = -1;
+                        }
+                        d.createdIso = j.value("created", "");
+                        d.updatedIso = j.value("updated", "");
 
-				if (j.contains("creator")) {
+                        if (j.contains("creator")) {
 					const auto &c = j["creator"];
-					d.creatorName = c.value("name", "");
+                                d.creatorName = c.value("name", "");
+                                d.creatorId = c.value("id", 0ULL);
+                                d.creatorType = c.value("type", "");
 					d.creatorVerified = c.value("hasVerifiedBadge", false);
 				}
 			}

@@ -16,6 +16,7 @@
 #include "./friends_actions.h"
 #include "ui/webview.hpp"
 #include "../games/games_utils.h"
+#include "core/time_utils.h"
 #include "ui/confirm.h"
 #include "../accounts/accounts_join_ui.h"
 #include "../context_menus.h"
@@ -483,18 +484,14 @@ void RenderFriendsTab()
                     ImGuiStyle &st = GetStyle();
                     const float indent = st.FramePadding.x * 2.0f;
                     Indent(indent);
-                    // We have a helper that returns "YYYY-MM-DD, hh:mm AM (x ago)"; we need just the relative part for the line,
-                    // but we can reuse the whole string as hover text and display a trimmed relative part visually.
-                    string pretty = formatPrettyDate(r.sentAt);
-                    size_t open = pretty.rfind('(');
-                    size_t close = pretty.rfind(')');
-                    string relative;
-                    if (open != string::npos && close != string::npos && close > open + 1) {
-                        relative = pretty.substr(open + 1, close - open - 1);
-                    }
+                    time_t sent_ts = parseIsoTimestamp(r.sentAt);
+                    string relative = sent_ts ? formatRelativeToNow(sent_ts) : string();
                     if (relative.empty()) relative = "just now";
                     TextDisabled("%s", relative.c_str());
-                    if (IsItemHovered()) SetTooltip("%s", pretty.c_str());
+                    if (IsItemHovered()) {
+                        string absStr = sent_ts ? formatAbsoluteLocal(sent_ts) : r.sentAt;
+                        SetTooltip("%s", absStr.c_str());
+                    }
                     Unindent(indent);
                 }
 
@@ -551,16 +548,16 @@ void RenderFriendsTab()
             float requestLabelColumnWidth = GetFontSize() * 7.5f;
             {
                 vector<const char*> labels;
-                labels.push_back("User ID:");
-                labels.push_back("Username:");
                 labels.push_back("Display Name:");
-                if (D.followers) labels.push_back("Followers:");
-                if (D.friends) labels.push_back("Friends:");
-                if (D.following) labels.push_back("Following:");
+                labels.push_back("Username:");
+                labels.push_back("User ID:");
+                labels.push_back("Friends:");
+                labels.push_back("Followers:");
+                labels.push_back("Following:");
                 if (!D.createdIso.empty()) labels.push_back("Created:");
                 if (!sel.sentAt.empty()) labels.push_back("Request Sent:");
-                if (!sel.originSourceType.empty()) labels.push_back("Source Type:");
-                if (sel.sourceUniverseId) labels.push_back("Source Universe ID:");
+                if (!sel.originSourceType.empty()) labels.push_back("Request Source:");
+                if (sel.sourceUniverseId) labels.push_back("Request Universe ID:");
                 labels.push_back("Mutual Friends:");
                 labels.push_back("Description:");
                 float mx = 0.0f;
@@ -591,16 +588,24 @@ void RenderFriendsTab()
                 };
                 auto addRowInt = [&](const char *label, int v){ addRow(label, to_string(v)); };
 
-                addRow("User ID:", to_string(D.id ? D.id : sel.userId));
-                addRow("Username:", !D.username.empty() ? D.username : sel.username);
+                // 1. Display Name
                 addRow("Display Name:", !D.displayName.empty() ? D.displayName : (sel.displayName.empty()? sel.username : sel.displayName));
-                if (D.followers) addRowInt("Followers:", D.followers);
+                // 2. Username
+                addRow("Username:", !D.username.empty() ? D.username : sel.username);
+                // 3. User ID
+                addRow("User ID:", to_string(D.id ? D.id : sel.userId));
+                // 4. Friends
                 if (D.friends) addRowInt("Friends:", D.friends);
+                // 5. Followers
+                if (D.followers) addRowInt("Followers:", D.followers);
+                // 6. Following
                 if (D.following) addRowInt("Following:", D.following);
-                if (!D.createdIso.empty()) addRow("Created:", formatPrettyDate(D.createdIso));
-                if (!sel.sentAt.empty()) addRow("Request Sent:", formatPrettyDate(sel.sentAt));
-                if (!sel.originSourceType.empty()) addRow("Source Type:", sel.originSourceType);
-                if (sel.sourceUniverseId) addRow("Source Universe ID:", to_string(sel.sourceUniverseId));
+                // 7. Created
+                if (!D.createdIso.empty()) addRow("Created:", formatAbsoluteWithRelativeFromIso(D.createdIso));
+                // Request-only fields
+                if (!sel.sentAt.empty()) addRow("Request Sent:", formatAbsoluteWithRelativeFromIso(sel.sentAt));
+                if (!sel.originSourceType.empty()) addRow("Request Source:", sel.originSourceType);
+                if (sel.sourceUniverseId) addRow("Request Universe ID:", to_string(sel.sourceUniverseId));
 
                 // Mutual Friends above Description
                 TableNextRow();
@@ -639,11 +644,16 @@ void RenderFriendsTab()
                 float descChildHeight = GetContentRegionAvail().y - reservedHeightBelow;
                 float minDescHeight = GetTextLineHeightWithSpacing() * 3.0f;
                 if (descChildHeight < minDescHeight) descChildHeight = minDescHeight;
-                const string descStr = D.description.empty() ? "(No description)" : D.description;
+                const bool hasDescReq = !D.description.empty();
+                const string descStrReq = hasDescReq ? D.description : string("No description");
                 PushID("ReqDesc");
                 BeginChild("##ReqDescScroll", ImVec2(0, descChildHeight - 4), false, ImGuiWindowFlags_HorizontalScrollbar);
-                TextWrapped("%s", descStr.c_str());
-                if (BeginPopupContextItem("CopyReqDesc")) { if (MenuItem("Copy")) { SetClipboardText(descStr.c_str()); } EndPopup(); }
+                if (hasDescReq) {
+                    TextWrapped("%s", descStrReq.c_str());
+                } else {
+                    TextDisabled("%s", descStrReq.c_str());
+                }
+                if (BeginPopupContextItem("CopyReqDesc")) { if (MenuItem("Copy")) { SetClipboardText(descStrReq.c_str()); } EndPopup(); }
                 EndChild();
                 PopID();
 
@@ -971,9 +981,9 @@ void RenderFriendsTab()
             {
                 // Compute width for this render pass only using rows we will draw
                 vector<const char*> labels;
-                labels.push_back("User ID:");
-                labels.push_back("Username:");
                 labels.push_back("Display Name:");
+                labels.push_back("Username:");
+                labels.push_back("User ID:");
                 labels.push_back("Friends:");
                 labels.push_back("Followers:");
                 labels.push_back("Following:");
@@ -1028,13 +1038,20 @@ void RenderFriendsTab()
                     addFriendDataRow(label, to_string(value));
                 };
 
-                addFriendDataRow("User ID:", to_string(D.id));
-                addFriendDataRow("Username:", D.username);
+                // 1. Display Name
                 addFriendDataRow("Display Name:", D.displayName.empty() ? D.username : D.displayName);
+                // 2. Username
+                addFriendDataRow("Username:", D.username);
+                // 3. User ID
+                addFriendDataRow("User ID:", to_string(D.id));
+                // 4. Friends
                 addFriendDataRowInt("Friends:", D.friends);
+                // 5. Followers
                 addFriendDataRowInt("Followers:", D.followers);
+                // 6. Following
                 addFriendDataRowInt("Following:", D.following);
-                addFriendDataRow("Created:", formatPrettyDate(D.createdIso));
+                // 7. Created
+                addFriendDataRow("Created:", formatAbsoluteWithRelativeFromIso(D.createdIso));
 
                 TableNextRow();
                 TableSetColumnIndex(0);
@@ -1069,11 +1086,16 @@ void RenderFriendsTab()
                     descChildHeight = minDescHeight;
                 }
 
-                const string descStr = D.description.empty() ? "(No description)" : D.description;
+                const bool hasDesc = !D.description.empty();
+                const string descStr = hasDesc ? D.description : string("No description");
                 PushID("FriendDesc");
                 BeginChild("##FriendDescScroll", ImVec2(0, descChildHeight - 4), false,
                            ImGuiWindowFlags_HorizontalScrollbar);
-                TextWrapped("%s", descStr.c_str());
+                if (hasDesc) {
+                    TextWrapped("%s", descStr.c_str());
+                } else {
+                    TextDisabled("%s", descStr.c_str());
+                }
                 if (BeginPopupContextItem("CopyFriendDesc"))
                 {
                     if (MenuItem("Copy"))

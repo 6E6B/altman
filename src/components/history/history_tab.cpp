@@ -17,6 +17,7 @@
 #include "log_types.h"
 #include "log_parser.h"
 #include "history_utils.h"
+#include "core/time_utils.h"
 
 #include "system/threading.h"
 #include "system/launcher.hpp"
@@ -335,8 +336,11 @@ static void DisplayLogDetails(const LogInfo &logInfo) {
 			EndPopup();
 		}
 
-		string timeStr = friendlyTimestamp(logInfo.timestamp);
-		addRow("Time:", timeStr);
+        string timeStr = friendlyTimestamp(logInfo.timestamp);
+        // Add relative in info panel for richer context
+        time_t tAbs = parseIsoTimestamp(logInfo.timestamp);
+        string timeWithRel = (tAbs ? formatAbsoluteWithRelativeLocal(tAbs) : timeStr);
+        addRow("Time:", timeWithRel);
 		addRow("Version:", logInfo.version);
 		addRow("Channel:", logInfo.channel);
 		addRow("User ID:", logInfo.userId);
