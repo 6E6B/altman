@@ -547,8 +547,28 @@ void RenderFriendsTab()
 
             ImGuiTableFlags tableFlags = ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit;
             PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(0.0f, 4.0f));
+            // Compute label column width based on rows that will actually render right now
+            float requestLabelColumnWidth = GetFontSize() * 7.5f;
+            {
+                vector<const char*> labels;
+                labels.push_back("User ID:");
+                labels.push_back("Username:");
+                labels.push_back("Display Name:");
+                if (D.followers) labels.push_back("Followers:");
+                if (D.friends) labels.push_back("Friends:");
+                if (D.following) labels.push_back("Following:");
+                if (!D.createdIso.empty()) labels.push_back("Created:");
+                if (!sel.sentAt.empty()) labels.push_back("Request Sent:");
+                if (!sel.originSourceType.empty()) labels.push_back("Source Type:");
+                if (sel.sourceUniverseId) labels.push_back("Source Universe ID:");
+                labels.push_back("Mutual Friends:");
+                labels.push_back("Description:");
+                float mx = 0.0f;
+                for (const char* lbl : labels) mx = (std::max)(mx, CalcTextSize(lbl).x);
+                requestLabelColumnWidth = (std::max)(requestLabelColumnWidth, mx + desiredTextIndent * 2.0f + GetFontSize());
+            }
             if (BeginTable("RequestInfoTable", 2, tableFlags)) {
-                TableSetupColumn("##reqlabel", ImGuiTableColumnFlags_WidthFixed, GetFontSize() * 7.5f);
+                TableSetupColumn("##reqlabel", ImGuiTableColumnFlags_WidthFixed, requestLabelColumnWidth);
                 TableSetupColumn("##reqvalue", ImGuiTableColumnFlags_WidthStretch);
 
                 auto addRow = [&](const char *label, const string &value, bool wrapped=false){
@@ -947,9 +967,25 @@ void RenderFriendsTab()
             ImGuiTableFlags tableFlags = ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg |
                                          ImGuiTableFlags_SizingFixedFit;
             PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(0.0f, 4.0f));
+            float friendLabelColumnWidth = GetFontSize() * 7.5f; // start with a sensible minimum
+            {
+                // Compute width for this render pass only using rows we will draw
+                vector<const char*> labels;
+                labels.push_back("User ID:");
+                labels.push_back("Username:");
+                labels.push_back("Display Name:");
+                labels.push_back("Friends:");
+                labels.push_back("Followers:");
+                labels.push_back("Following:");
+                labels.push_back("Created:");
+                labels.push_back("Description:");
+                float mx = 0.0f;
+                for (const char* lbl : labels) mx = (std::max)(mx, CalcTextSize(lbl).x);
+                friendLabelColumnWidth = (std::max)(friendLabelColumnWidth, mx + desiredTextIndent * 2.0f + GetFontSize());
+            }
             if (BeginTable("FriendInfoTable", 2, tableFlags))
             {
-                TableSetupColumn("##friendlabel", ImGuiTableColumnFlags_WidthFixed, GetFontSize() * 7.5f); // ~120px
+                TableSetupColumn("##friendlabel", ImGuiTableColumnFlags_WidthFixed, friendLabelColumnWidth);
                 TableSetupColumn("##friendvalue", ImGuiTableColumnFlags_WidthStretch);
 
                 auto addFriendDataRow = [&](const char *label, const string &value, bool isWrapped = false)
