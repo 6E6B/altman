@@ -1,22 +1,20 @@
 #pragma once
-#include <imgui.h>
 #include <deque>
+#include <imgui.h>
 #include <string>
 
 namespace ModalPopup {
 	struct Notification {
-		std::string message;
-		bool open = true;
+			std::string message;
+			bool open = true;
 	};
 
 	inline std::deque<Notification> queue;
 
-	inline void Add(const std::string &msg) {
-		queue.push_back({msg, true});
-	}
+	inline void Add(const std::string &msg) { queue.push_back({msg, true}); }
 
 	inline void Render() {
-		if (queue.empty()) return;
+		if (queue.empty()) { return; }
 		Notification &current = queue.front();
 		if (current.open) {
 			ImGui::OpenPopup("Notification");
@@ -32,4 +30,4 @@ namespace ModalPopup {
 			ImGui::EndPopup();
 		}
 	}
-}
+} // namespace ModalPopup

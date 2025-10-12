@@ -1,14 +1,14 @@
 #pragma once
 
+#include <mutex>
 #include <string>
 #include <vector>
-#include <mutex>
 
 namespace Console {
-    void Log(const std::string &message);
+	void Log(const std::string &message);
 
-    void RenderConsoleTab();
+	void RenderConsoleTab();
 
-    std::vector<std::string> GetLogs(); // Added for potential external access
-    std::string GetLatestLogMessageForStatus();
-}
+	std::vector<std::string> GetLogs(); // Added for potential external access
+	std::string GetLatestLogMessageForStatus();
+} // namespace Console

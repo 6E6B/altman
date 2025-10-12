@@ -1,9 +1,9 @@
 ﻿#pragma once
+#include "modal_popup.h"
+#include <chrono>
 #include <mutex>
 #include <string>
 #include <thread>
-#include <chrono>
-#include "modal_popup.h"
 
 using namespace std;
 
@@ -12,10 +12,11 @@ namespace Status {
 	inline string _originalText = "Idle";
 	inline string _displayText = "Idle";
 
-	inline chrono::steady_clock::time_point _lastSetTime{};
+	inline chrono::steady_clock::time_point _lastSetTime {};
 
 	inline void Set(const string &s) {
-		auto tp = chrono::steady_clock::now(); {
+		auto tp = chrono::steady_clock::now();
+		{
 			lock_guard<mutex> lock(_mtx);
 			_originalText = s;
 			_displayText = _originalText + " (5)";
@@ -26,9 +27,7 @@ namespace Status {
 			for (int i = 5; i >= 0; --i) {
 				{
 					lock_guard<mutex> lock(_mtx);
-					if (_lastSetTime != tp) {
-						return;
-					}
+					if (_lastSetTime != tp) { return; }
 				}
 
 				this_thread::sleep_for(chrono::seconds(1));
@@ -57,4 +56,4 @@ namespace Status {
 		lock_guard<mutex> lock(_mtx);
 		return _displayText;
 	}
-}
+} // namespace Status
