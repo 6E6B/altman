@@ -1,5 +1,6 @@
-﻿#include "data.h"
-#include <dpapi.h>
+﻿#define WIN32_LEAN_AND_MEAN
+#define NOGDI
+#include "data.h"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -8,8 +9,9 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <wincrypt.h>
 #include <windows.h>
+#include <wincrypt.h>
+#include <dpapi.h>
 
 #include "core/app_state.h"
 #include "core/base64.h"
