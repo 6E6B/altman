@@ -15,15 +15,15 @@ extern int join_type_combo_index;
 extern int g_activeTab;
 
 enum Tab {
-    Tab_Accounts,
-    Tab_Friends,
-    Tab_Servers,
-    Tab_Games,
-    Tab_History,
-    Tab_Console,
-    Tab_Settings,
-    Tab_Inventory,
-    Tab_COUNT
+	Tab_Accounts,
+	Tab_Friends,
+	Tab_Servers,
+	Tab_Games,
+	Tab_History,
+	Tab_Console,
+	Tab_Settings,
+	Tab_Inventory,
+	Tab_COUNT
 };
 
 extern uint64_t g_targetPlaceId_ServersTab;

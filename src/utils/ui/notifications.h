@@ -1,21 +1,17 @@
 #pragma once
 
-#include <windows.h>
-#include <string>
 #include <shellapi.h>
+#include <string>
+#include <windows.h>
 
 namespace Notifications {
 	// Global variable to store the main application HWND
 	extern HWND g_appHWnd;
 
 	// Initialization function to set the HWND
-	inline void Initialize(HWND mainWindowHandle) {
-		g_appHWnd = mainWindowHandle;
-	}
+	inline void Initialize(HWND mainWindowHandle) { g_appHWnd = mainWindowHandle; }
 
-	inline bool showNotification(
-		const std::wstring &title,
-		const std::wstring &text) {
+	inline bool showNotification(const std::wstring &title, const std::wstring &text) {
 		if (!g_appHWnd) {
 			// HWND not initialized, cannot show notification
 			// Optionally, log an error or handle this case
@@ -30,9 +26,7 @@ namespace Notifications {
 		Shell_NotifyIconW(NIM_DELETE, &nid);
 
 		nid.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
-		if (!nid.hIcon) {
-			return false;
-		}
+		if (!nid.hIcon) { return false; }
 
 		nid.uFlags = NIF_ICON | NIF_TIP | NIF_INFO | NIF_STATE;
 
@@ -58,4 +52,4 @@ namespace Notifications {
 		}
 		return success;
 	}
-}
+} // namespace Notifications

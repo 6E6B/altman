@@ -1,13 +1,13 @@
 #include "console.h"
-#include <imgui.h>
-#include <vector>
-#include <string>
-#include <mutex>
-#include <chrono>
-#include <iomanip>
-#include <sstream>
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <imgui.h>
+#include <iomanip>
+#include <mutex>
+#include <sstream>
+#include <string>
+#include <vector>
 
 using namespace ImGui;
 using namespace std;
@@ -21,7 +21,7 @@ static char g_searchBuffer[256] = "";
 static string getCurrentTimestamp() {
 	auto now = chrono::system_clock::now();
 	auto in_time_t = chrono::system_clock::to_time_t(now);
-	std::tm buf{};
+	std::tm buf {};
 
 	localtime_s(&buf, &in_time_t);
 
@@ -31,19 +31,18 @@ static string getCurrentTimestamp() {
 }
 
 static string toLower(string s) {
-	transform(s.begin(), s.end(), s.begin(),
-	          [](unsigned char c) {
-		          return static_cast<char>(tolower(c));
-	          });
+	transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(tolower(c)); });
 	return s;
 }
 
 namespace Console {
 	void Log(const string &message_content) {
-		string final_log_entry = "[" + getCurrentTimestamp() + "] " + message_content; {
+		string final_log_entry = "[" + getCurrentTimestamp() + "] " + message_content;
+		{
 			lock_guard<mutex> lock(g_logMutex);
 			g_logMessages.push_back(final_log_entry);
-		} {
+		}
+		{
 			lock_guard<mutex> statusLock(g_statusMessageMutex);
 			g_latestStatusMessage = final_log_entry;
 		}
@@ -67,9 +66,7 @@ namespace Console {
 		float buttons_total_width = clearButtonWidth + copyButtonWidth + style.ItemSpacing.x;
 		float searchBarWidth = GetContentRegionAvail().x - buttons_total_width - style.ItemSpacing.x;
 		float minField = GetFontSize() * 6.25f; // ~100px at 16px
-		if (searchBarWidth < minField) {
-			searchBarWidth = minField;
-		}
+		if (searchBarWidth < minField) { searchBarWidth = minField; }
 		PushItemWidth(searchBarWidth);
 		InputTextWithHint("##SearchLog", "Search...", g_searchBuffer, IM_ARRAYSIZE(g_searchBuffer));
 		PopItemWidth();
@@ -86,46 +83,42 @@ namespace Console {
 			string logsToCopy;
 			string searchTermLower = toLower(string(g_searchBuffer));
 			lock_guard<mutex> lock(g_logMutex);
-			for (const auto &msg: g_logMessages) {
+			for (const auto &msg : g_logMessages) {
 				if (searchTermLower.empty() || toLower(msg).find(searchTermLower) != string::npos) {
 					logsToCopy += msg + "\n";
 				}
 			}
-			if (!logsToCopy.empty()) {
-				SetClipboardText(logsToCopy.c_str());
-			}
+			if (!logsToCopy.empty()) { SetClipboardText(logsToCopy.c_str()); }
 		}
 
 		float footer_height_to_reserve = style.ItemSpacing.y;
 		float childHeight = GetContentRegionAvail().y - footer_height_to_reserve;
 		float minChild = GetTextLineHeightWithSpacing() * 3.0f;
-		if (childHeight < minChild) {
-			childHeight = minChild;
-		}
+		if (childHeight < minChild) { childHeight = minChild; }
 
 		PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, original_child_window_padding_y / 2));
-		BeginChild("LogScrollingRegion", ImVec2(0, childHeight), ImGuiChildFlags_Border, ImGuiWindowFlags_None); {
+		BeginChild("LogScrollingRegion", ImVec2(0, childHeight), ImGuiChildFlags_Border, ImGuiWindowFlags_None);
+		{
 			PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(0.0f, original_table_cell_padding_y));
 
-			if (BeginTable("LogTable", 1,
-			               ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_NoPadOuterX)) {
+			if (BeginTable(
+					"LogTable",
+					1,
+					ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_NoPadOuterX
+				)) {
 				lock_guard<mutex> lock(g_logMutex);
 				string searchTermLower = toLower(string(g_searchBuffer));
 
-				for (const auto &msg: g_logMessages) {
+				for (const auto &msg : g_logMessages) {
 					if (searchTermLower.empty() || toLower(msg).find(searchTermLower) != string::npos) {
 						TableNextRow();
 						TableNextColumn();
 
 						Spacing();
 
-						if (desired_text_indent > 0.0f) {
-							Indent(desired_text_indent);
-						}
+						if (desired_text_indent > 0.0f) { Indent(desired_text_indent); }
 						TextUnformatted(msg.c_str());
-						if (desired_text_indent > 0.0f) {
-							Unindent(desired_text_indent);
-						}
+						if (desired_text_indent > 0.0f) { Unindent(desired_text_indent); }
 
 						Spacing();
 						Separator();
@@ -139,9 +132,7 @@ namespace Console {
 		bool autoScrollDesired = true;
 		bool userHasScrolled = false;
 		if (GetScrollMaxY() > 0) {
-			if (GetScrollY() < GetScrollMaxY() - (GetTextLineHeightWithSpacing() * 1.5f)) {
-				userHasScrolled = true;
-			}
+			if (GetScrollY() < GetScrollMaxY() - (GetTextLineHeightWithSpacing() * 1.5f)) { userHasScrolled = true; }
 		}
 		if (autoScrollDesired && !userHasScrolled) {
 			if (GetScrollY() >= GetScrollMaxY() - style.ItemSpacing.y || GetScrollMaxY() == 0.0f) {
@@ -157,4 +148,4 @@ namespace Console {
 		std::lock_guard<std::mutex> lock(g_logMutex);
 		return g_logMessages;
 	}
-}
+} // namespace Console

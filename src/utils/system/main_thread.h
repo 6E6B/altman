@@ -1,6 +1,6 @@
 #pragma once
-#include <functional>
 #include <deque>
+#include <functional>
 #include <mutex>
 
 namespace MainThread {
@@ -14,12 +14,11 @@ namespace MainThread {
 	}
 
 	inline void Process() {
-		std::deque<Task> toRun; {
+		std::deque<Task> toRun;
+		{
 			std::lock_guard<std::mutex> lock(mtx);
 			toRun.swap(tasks);
 		}
-		for (auto &t: toRun) {
-			t();
-		}
+		for (auto &t : toRun) { t(); }
 	}
-}
+} // namespace MainThread

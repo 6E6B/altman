@@ -1,56 +1,56 @@
 ﻿#ifndef DATA_H
 #define DATA_H
 
-#include <vector>
-#include <string>
-#include <set>
+#include "history/log_types.h"
 #include <array>
 #include <ctime>
-#include <unordered_map>
 #include <imgui.h>
-#include "history/log_types.h"
+#include <set>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 struct AccountData {
-	int id = 0;
-	std::string displayName;
-	std::string username;
-	std::string userId;
-	std::string status;
-	std::string voiceStatus;
-	time_t voiceBanExpiry = 0;
-	time_t banExpiry = 0;
-	std::string note;
-	std::string cookie;
-	bool isFavorite = false;
-	// For InGame status tooltip
-	std::string lastLocation;
-	// Cached presence details for join menu
-	uint64_t placeId = 0;
-	std::string jobId;
+		int id = 0;
+		std::string displayName;
+		std::string username;
+		std::string userId;
+		std::string status;
+		std::string voiceStatus;
+		time_t voiceBanExpiry = 0;
+		time_t banExpiry = 0;
+		std::string note;
+		std::string cookie;
+		bool isFavorite = false;
+		// For InGame status tooltip
+		std::string lastLocation;
+		// Cached presence details for join menu
+		uint64_t placeId = 0;
+		std::string jobId;
 };
 
 struct FavoriteGame {
-	std::string name;
-	uint64_t universeId;
-	uint64_t placeId;
+		std::string name;
+		uint64_t universeId;
+		uint64_t placeId;
 };
 
 struct FriendInfo {
-	uint64_t id = 0;
-	std::string username;
-	std::string displayName;
+		uint64_t id = 0;
+		std::string username;
+		std::string displayName;
 
-	std::string presence;
-	std::string lastLocation;
-	uint64_t placeId = 0;
-	std::string jobId;
+		std::string presence;
+		std::string lastLocation;
+		uint64_t placeId = 0;
+		std::string jobId;
 };
 
 extern std::vector<FavoriteGame> g_favorites;
 extern std::vector<AccountData> g_accounts;
 extern std::vector<FriendInfo> g_friends;
-extern std::unordered_map<int, std::vector<FriendInfo> > g_accountFriends;
-extern std::unordered_map<int, std::vector<FriendInfo> > g_unfriendedFriends;
+extern std::unordered_map<int, std::vector<FriendInfo>> g_accountFriends;
+extern std::unordered_map<int, std::vector<FriendInfo>> g_unfriendedFriends;
 extern std::set<int> g_selectedAccountIds;
 extern ImVec4 g_accentColor;
 
@@ -79,8 +79,7 @@ namespace Data {
 
 	void SaveFriends(const std::string &filename = "friends.json");
 
-
 	std::string StorageFilePath(const std::string &filename);
-}
+} // namespace Data
 
 #endif

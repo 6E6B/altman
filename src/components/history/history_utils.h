@@ -1,7 +1,7 @@
 #pragma once
 
-#include <string>
 #include "log_types.h"
+#include <string>
 
 std::string friendlyTimestamp(const std::string &isoTimestamp);
 

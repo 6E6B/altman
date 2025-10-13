@@ -1,42 +1,39 @@
 ﻿#pragma once
+#include "modal_popup.h"
+#include <chrono>
 #include <mutex>
 #include <string>
 #include <thread>
-#include <chrono>
-#include "modal_popup.h"
-
-using namespace std;
 
 namespace Status {
-	inline mutex _mtx;
-	inline string _originalText = "Idle";
-	inline string _displayText = "Idle";
+	inline std::mutex _mtx;
+	inline std::string _originalText = "Idle";
+	inline std::string _displayText = "Idle";
 
-	inline chrono::steady_clock::time_point _lastSetTime{};
+	inline std::chrono::steady_clock::time_point _lastSetTime {};
 
-	inline void Set(const string &s) {
-		auto tp = chrono::steady_clock::now(); {
-			lock_guard<mutex> lock(_mtx);
+	inline void Set(const std::string &s) {
+		auto tp = std::chrono::steady_clock::now();
+		{
+			std::lock_guard<std::mutex> lock(_mtx);
 			_originalText = s;
 			_displayText = _originalText + " (5)";
 			_lastSetTime = tp;
 		}
 
-		thread([tp, s]() {
+		std::thread([tp, s]() {
 			for (int i = 5; i >= 0; --i) {
 				{
-					lock_guard<mutex> lock(_mtx);
-					if (_lastSetTime != tp) {
-						return;
-					}
+					std::lock_guard<std::mutex> lock(_mtx);
+					if (_lastSetTime != tp) { return; }
 				}
 
-				this_thread::sleep_for(chrono::seconds(1));
-				lock_guard<mutex> lock(_mtx);
+				std::this_thread::sleep_for(std::chrono::seconds(1));
+				std::lock_guard<std::mutex> lock(_mtx);
 
 				if (_lastSetTime == tp) {
 					if (i > 0) {
-						_displayText = s + " (" + to_string(i - 1) + ")";
+						_displayText = s + " (" + std::to_string(i - 1) + ")";
 					} else {
 						_displayText = "Idle";
 						_originalText = "Idle";
@@ -48,13 +45,13 @@ namespace Status {
 		}).detach();
 	}
 
-	inline void Error(const string &s) {
+	inline void Error(const std::string &s) {
 		Set(s);
 		ModalPopup::Add(s);
 	}
 
-	inline string Get() {
-		lock_guard<mutex> lock(_mtx);
+	inline std::string Get() {
+		std::lock_guard<std::mutex> lock(_mtx);
 		return _displayText;
 	}
-}
+} // namespace Status

@@ -1,7 +1,7 @@
 #pragma once
 
-#include <string>
 #include "../data.h"
+#include <string>
 
 void RenderAccountContextMenu(AccountData &account, const std::string &unique_context_menu_id);
 

@@ -1,15 +1,15 @@
 #pragma once
 
-#include <imgui.h>
 #include <deque>
 #include <functional>
+#include <imgui.h>
 #include <string>
 
 namespace ConfirmPopup {
 	struct Item {
-		std::string message;
-		std::function<void()> onYes;
-		bool open = true;
+			std::string message;
+			std::function<void()> onYes;
+			bool open = true;
 	};
 
 	inline std::deque<Item> queue;
@@ -19,8 +19,7 @@ namespace ConfirmPopup {
 	}
 
 	inline void Render() {
-		if (queue.empty())
-			return;
+		if (queue.empty()) { return; }
 
 		Item &cur = queue.front();
 		if (cur.open) {
@@ -32,8 +31,7 @@ namespace ConfirmPopup {
 			ImGui::TextWrapped("%s", cur.message.c_str());
 			ImGui::Spacing();
 			if (ImGui::Button("Yes", ImVec2(120, 0))) {
-				if (cur.onYes)
-					cur.onYes();
+				if (cur.onYes) { cur.onYes(); }
 				ImGui::CloseCurrentPopup();
 				queue.pop_front();
 			}
@@ -45,4 +43,4 @@ namespace ConfirmPopup {
 			ImGui::EndPopup();
 		}
 	}
-}
+} // namespace ConfirmPopup
