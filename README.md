@@ -1,3 +1,7 @@
+> [!CAUTION]
+> This project is now **deprecated** and will no longer be maintained.
+> Please consider finding an alternative tool or fork the repository if you wish to continue development.
+
 <div align="center">
     <img src="src/assets/images/256x256.png"
             alt="Picture"
