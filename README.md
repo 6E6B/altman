@@ -1,6 +1,6 @@
 > [!CAUTION]
 > This project is now **deprecated** and will no longer be maintained.
-> Please consider using an alternative tool like (voxel)[https://github.com/6E6B/voxel] or fork the repository if you wish to continue development.
+> Please consider using an alternative tool like [voxel](https://github.com/6E6B/voxel) or fork the repository if you wish to continue development.
 
 <div align="center">
     <img src="src/assets/images/256x256.png"
