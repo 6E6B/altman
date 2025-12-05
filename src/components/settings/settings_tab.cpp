@@ -91,12 +91,12 @@ void RenderSettingsTab() {
                 bool multi = g_multiRobloxEnabled;
                 if (Checkbox("Multi Roblox", &multi)) {
                         g_multiRobloxEnabled = multi;
-#ifdef _WIN32
+
                         if (g_multiRobloxEnabled)
                                 MultiInstance::Enable();
                         else
                                 MultiInstance::Disable();
-#endif
+                                
                         Data::SaveSettings("settings.json");
                 }
 
@@ -138,7 +138,7 @@ void RenderSettingsTab() {
                 if (childHeight < 0)
                         childHeight = 0;
 
-                BeginChild("ConsoleArea", ImVec2(0, childHeight), ImGuiChildFlags_Border);
+                BeginChild("ConsoleArea", ImVec2(0, childHeight), ImGuiChildFlags_Borders);
                 Console::RenderConsoleTab();
                 EndChild();
 

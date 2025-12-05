@@ -29,7 +29,9 @@
 #include "../accounts/accounts_join_ui.h"
 #include "../context_menus.h"
 #include "../../utils/core/account_utils.h"
-#include <windows.h>
+#ifdef _WIN32
+    #include <windows.h>
+#endif
 
 namespace fs = filesystem;
 using namespace ImGui;
@@ -52,10 +54,22 @@ static vector<int> g_filtered_log_indices;  // Indices of logs that match the se
 static bool g_search_active = false;       // Flag to indicate if search is active
 static bool g_should_scroll_to_selection = false; // Flag to auto-scroll to selection when search is cleared
 
+static void OpenFileOrFolder(const std::string& path) {
+#ifdef _WIN32
+    ShellExecuteA(NULL, "open", path.c_str(), NULL, NULL, SW_SHOWNORMAL);
+#elif __APPLE__
+    std::string command = "open \"" + path + "\"";
+    system(command.c_str());
+#else
+    std::string command = "xdg-open \"" + path + "\"";
+    system(command.c_str());
+#endif
+}
+
 static void openLogsFolder() {
 	string dir = logsFolder();
 	if (!dir.empty() && fs::exists(dir)) {
-		ShellExecuteA(NULL, "open", dir.c_str(), NULL, NULL, SW_SHOWNORMAL);
+		OpenFileOrFolder(dir.c_str());
 	} else {
 		LOG_WARN("Logs folder not found.");
 	}
@@ -331,7 +345,7 @@ static void DisplayLogDetails(const LogInfo &logInfo) {
 			}
 			Separator();
 			if (MenuItem("Open File")) {
-				ShellExecuteA(NULL, "open", logInfo.fullPath.c_str(), NULL, NULL, SW_SHOWNORMAL);
+				OpenFileOrFolder(logInfo.fullPath);
 			}
 			EndPopup();
 		}
@@ -722,7 +736,7 @@ void RenderHistoryTab() {
 				}
 				Separator();
 				if (MenuItem("Open File")) {
-					ShellExecuteA(NULL, "open", logInfo.fullPath.c_str(), NULL, NULL, SW_SHOWNORMAL);
+					OpenFileOrFolder(logInfo.fullPath);
 				}
 				EndPopup();
 			}
@@ -760,7 +774,7 @@ void RenderHistoryTab() {
 			
 			// Just show Open Log File button at the bottom - instance-specific launch buttons are in each instance
 			if (Button("Open Log File")) {
-				ShellExecuteA(NULL, "open", logInfo.fullPath.c_str(), NULL, NULL, SW_SHOWNORMAL);
+				OpenFileOrFolder(logInfo.fullPath);
 			}
 
 			// Button to open log file directly if not already shown as part of another condition

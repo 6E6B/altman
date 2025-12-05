@@ -23,7 +23,11 @@ static string getCurrentTimestamp() {
 	auto in_time_t = chrono::system_clock::to_time_t(now);
 	std::tm buf{};
 
-	localtime_s(&buf, &in_time_t);
+#ifdef _WIN32
+    localtime_s(&buf, &in_time_t);
+#else
+    localtime_r(&in_time_t, &buf);
+#endif
 
 	ostringstream ss;
 	ss << put_time(&buf, "%H:%M:%S");
@@ -104,7 +108,7 @@ namespace Console {
 		}
 
 		PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, original_child_window_padding_y / 2));
-		BeginChild("LogScrollingRegion", ImVec2(0, childHeight), ImGuiChildFlags_Border, ImGuiWindowFlags_None); {
+		BeginChild("LogScrollingRegion", ImVec2(0, childHeight), ImGuiChildFlags_Borders, ImGuiWindowFlags_None); {
 			PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(0.0f, original_table_cell_padding_y));
 
 			if (BeginTable("LogTable", 1,

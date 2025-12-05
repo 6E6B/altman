@@ -39,3 +39,7 @@ compile_commands.json
 *.pdb
 *.ilk
 *.exp
+
+# Platform files
+.DS_Store
+Thumbs.db

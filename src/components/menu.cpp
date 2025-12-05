@@ -1,12 +1,15 @@
 #include <algorithm>
-#include <windows.h>
-#include <tlhelp32.h>
-#include <shlobj.h>
 #include <imgui.h>
 #include <array>
 #include <string>
 #include <vector>
 #include <filesystem>
+
+#ifdef _WIN32
+    #include <windows.h>
+    #include <tlhelp32.h>
+    #include <shlobj.h>
+#endif
 
 #include "network/roblox.h"
 #include "system/threading.h"
@@ -243,32 +246,7 @@ bool RenderMainMenu() {
 
 		if (BeginMenu("Utilities")) {
 			if (MenuItem("Kill Roblox")) {
-				HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-				PROCESSENTRY32 pe;
-				pe.dwSize = sizeof(pe);
-
-				if (Process32First(hSnap, &pe)) {
-					do {
-						if (_stricmp(pe.szExeFile, "RobloxPlayerBeta.exe") == 0) {
-							HANDLE hProc = OpenProcess(PROCESS_TERMINATE, FALSE, pe.th32ProcessID);
-							if (hProc) {
-								TerminateProcess(hProc, 0);
-								CloseHandle(hProc);
-								LOG_INFO(string("Terminated Roblox process: ") + to_string(pe.th32ProcessID));
-							} else {
-								LOG_ERROR(
-									string("Failed to open Roblox process for termination: ") + to_string(pe.
-										th32ProcessID) + " (Error: " + to_string(GetLastError()) + ")");
-							}
-						}
-					} while (Process32Next(hSnap, &pe));
-				} else {
-					LOG_ERROR(
-						string("Process32First failed when trying to kill Roblox. (Error: ") + to_string(GetLastError())
-						+ ")");
-				}
-				CloseHandle(hSnap);
-				LOG_INFO("Kill Roblox process completed.");
+				RobloxControl::KillRobloxProcesses();
 			}
 
 			if (MenuItem("Clear Roblox Cache")) {

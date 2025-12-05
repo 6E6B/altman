@@ -1,6 +1,16 @@
 #define CRT_SECURE_NO_WARNINGS
 #include "accounts_context_menu.h"
-#include <shlobj_core.h>
+
+#ifdef _WIN32
+    #include <shlobj_core.h>
+    #include <wrl.h>
+    #include <wil/com.h>
+    #include <dwmapi.h>
+    #pragma comment(lib, "Dwmapi.lib")
+    using Microsoft::WRL::Callback;
+    using Microsoft::WRL::ComPtr;
+#endif
+
 #include <imgui.h>
 #include <chrono>
 #include <random>
@@ -9,15 +19,23 @@
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
-#include <wrl.h>
-#include <wil/com.h>
 #include <thread>
 #include <atomic>
-#include <dwmapi.h>
 #include <memory>
 #include <algorithm>
+#include <cstring>
 
-#include "network/roblox.h"
+// Cross-platform safe string copy
+#ifdef _WIN32
+    #define SAFE_STRNCPY(dst, src, size) strncpy_s(dst, size, src, _TRUNCATE)
+#else
+    #define SAFE_STRNCPY(dst, src, size) do { \
+        strncpy(dst, src, size - 1); \
+        dst[size - 1] = '\0'; \
+    } while(0)
+#endif
+
+#include "utils/network/roblox.h"
 #include "ui/webview.hpp"
 #include "../webview_helpers.h"
 #include "system/threading.h"
@@ -31,11 +49,6 @@
 #include "../context_menus.h"
 #include "../../utils/core/account_utils.h"
 #include "../../utils/network/roblox/common.h"
-
-#pragma comment(lib, "Dwmapi.lib")
-
-using Microsoft::WRL::Callback;
-using Microsoft::WRL::ComPtr;
 
 static char g_edit_note_buffer_ctx[1024];
 static int g_editing_note_for_account_id_ctx = -1;
@@ -280,7 +293,7 @@ void RenderAccountContextMenu(AccountData &account, const string &unique_context
                             if (ap->note != firstNote) { allSame = false; break; }
                         }
                         const string &initial = allSame ? firstNote : string();
-                        strncpy_s(g_edit_note_buffer_ctx, initial.c_str(), sizeof(g_edit_note_buffer_ctx) - 1);
+                        SAFE_STRNCPY(g_edit_note_buffer_ctx, initial.c_str(), sizeof(g_edit_note_buffer_ctx));
                         g_edit_note_buffer_ctx[sizeof(g_edit_note_buffer_ctx) - 1] = '\0';
                         g_editing_note_for_account_id_ctx = -2;
                     }
@@ -311,7 +324,7 @@ void RenderAccountContextMenu(AccountData &account, const string &unique_context
                 if (MenuItem("Copy Note")) SetClipboardText(account.note.c_str());
                 if (BeginMenu("Edit Note")) {
                     if (g_editing_note_for_account_id_ctx != account.id) {
-                        strncpy_s(g_edit_note_buffer_ctx, account.note.c_str(), sizeof(g_edit_note_buffer_ctx) - 1);
+                        SAFE_STRNCPY(g_edit_note_buffer_ctx, account.note.c_str(), sizeof(g_edit_note_buffer_ctx));
                         g_edit_note_buffer_ctx[sizeof(g_edit_note_buffer_ctx) - 1] = '\0';
                         g_editing_note_for_account_id_ctx = account.id;
                     }
