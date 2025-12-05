@@ -284,7 +284,7 @@ void RenderServersTab()
             snprintf(selectable_widget_id, sizeof(selectable_widget_id), "##JobIDSelectable_%s", srv.jobId.c_str());
 
             if (Selectable(selectable_widget_id, false,
-                           ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowItemOverlap | ImGuiSelectableFlags_AllowDoubleClick,
+                           ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap | ImGuiSelectableFlags_AllowDoubleClick,
                            ImVec2(0, row_interaction_height)) &&
                 IsMouseDoubleClicked(0))
             {

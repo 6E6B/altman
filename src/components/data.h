@@ -62,6 +62,12 @@ extern bool g_clearCacheOnLaunch;
 extern std::array<char, 128> s_jobIdBuffer;
 extern std::array<char, 128> s_playerBuffer;
 
+#ifdef __APPLE__
+std::string GetApplicationDir();
+std::string GetApplicationName();
+std::string GetExecutablePath();
+#endif
+
 namespace Data {
 	void LoadSettings(const std::string &filename = "settings.json");
 

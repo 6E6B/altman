@@ -102,7 +102,7 @@ void RenderAccountsTable(vector<AccountData> &accounts_to_display, const char *t
 			if (Selectable(
 					selectable_label,
 					is_row_selected,
-					ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowItemOverlap,
+					ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap,
 					ImVec2(0, row_interaction_height)))
 			{
 				if (GetIO().KeyCtrl)
@@ -178,7 +178,7 @@ void RenderAccountsTable(vector<AccountData> &accounts_to_display, const char *t
 
 			RenderAccountContextMenu(account, context_menu_id);
 
-			SetItemAllowOverlap();
+			SetNextItemAllowOverlap();
 
 			SetCursorPosY(cell_content_start_y + vertical_padding);
 			TextUnformatted(account.displayName.c_str());

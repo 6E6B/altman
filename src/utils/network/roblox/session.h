@@ -37,12 +37,20 @@ namespace Roblox {
 			return "Offline";
 		}
 
+		#ifdef _WIN32
 		OutputDebugStringA(("Raw response: " + response.text).c_str());
+		#else
+		std::cout << "Raw response: " << response.text << "\n";
+		#endif
 		LOG_INFO("Raw response body: " + response.text);
 
 		auto json = HttpClient::decode(response);
 
+		#ifdef _WIN32
 		OutputDebugStringA(("Parsed JSON: " + json.dump()).c_str());
+		#else
+		std::cout << "Parsed JSON: " << json.dump() << "\n";
+		#endif
 		LOG_INFO("Parsed JSON: " + json.dump());
 
 		if (json.contains("userPresences") && json["userPresences"].is_array() && !json["userPresences"].empty()) {

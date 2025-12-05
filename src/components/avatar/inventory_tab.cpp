@@ -1,7 +1,6 @@
 #include "inventory.h"
 
 #include <imgui.h>
-#include <d3d11.h>
 #include <string>
 #include "ui/image.h"
 #include "system/threading.h"
@@ -14,7 +13,7 @@
 #include <cstring>
 #include <cctype>
 #include <cmath>
-#include <imgui_internal.h> // for ImGuiListClipper
+#include <imgui_internal.h>
 #include <unordered_set>
 
 using namespace ImGui;
@@ -31,7 +30,7 @@ struct CategoryInfo {
 };
 
 struct ThumbInfo {
-    ID3D11ShaderResourceView *srv{nullptr};
+    TextureType srv{nullptr};
     int width{0};
     int height{0};
     bool loading{false};
@@ -58,7 +57,7 @@ constexpr int kMaxConcurrentThumbLoads = 24; // tweak as needed
 
 void RenderInventoryTab() {
     // Persistent state across frames
-    static ID3D11ShaderResourceView *s_texture = nullptr;
+    static TextureType s_texture = nullptr;
     static int s_imageWidth = 0;
     static int s_imageHeight = 0;
     static bool s_loading = false;
@@ -114,10 +113,17 @@ void RenderInventoryTab() {
         s_started = false;
         s_failed = false;
         s_loading = false;
+
+        #ifdef _WIN32
         if (s_texture) {
             s_texture->Release();
             s_texture = nullptr;
         }
+        #else
+        s_texture = nullptr;
+        #endif
+
+
         s_loadedUserId = currentUserId;
     }
 
@@ -134,10 +140,12 @@ void RenderInventoryTab() {
         s_invFailed = false;
         s_searchBuffer[0] = '\0';
         // Clear thumbnail cache for previous user
+        #ifdef _WIN32
         for (auto &p: s_thumbCache) {
             if (p.second.srv)
                 p.second.srv->Release();
         }
+        #endif
         s_thumbCache.clear();
         // reset equipped list state
         s_equippedUserId = 0;

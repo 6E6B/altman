@@ -42,7 +42,7 @@ namespace HttpClient {
 			params // <-- directly pass it
 		);
 		std::map<std::string, std::string> hdrs(r.header.begin(), r.header.end());
-		return {r.status_code, r.text, hdrs};
+		return {static_cast<int>(r.status_code), r.text, hdrs};
 	}
 
 	inline Response post(
@@ -75,7 +75,7 @@ namespace HttpClient {
 			);
 		}
 		map<string, string> hdrs(r.header.begin(), r.header.end());
-		return {r.status_code, r.text, hdrs};
+		return {static_cast<int>(r.status_code), r.text, hdrs};
 	}
 
 
