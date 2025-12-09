@@ -70,8 +70,6 @@ void ReloadFonts(float dpiScale) {
     style = ImGuiStyle();
     ImGui::StyleColorsDark();
     style.ScaleAllSizes(dpiScale);
-
-    io.Fonts->Build();
 }
 
 // Load texture from memory (Metal implementation)
