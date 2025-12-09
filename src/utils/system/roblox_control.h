@@ -291,7 +291,10 @@ namespace RobloxControl {
             std::string(home) + "/Library/Caches/com.roblox.RobloxPlayer",
             std::string(home) + "/Library/Roblox/LocalStorage",
             std::string(home) + "/Library/Roblox/OTAPatchBackups",
-            std::string(home) + "/Library/Saved Application State/com.roblox.RobloxPlayer.savedState"
+            std::string(home) + "/Library/Saved Application State/com.roblox.RobloxPlayer.savedState",
+            std::string(home) + "/Library/HTTPStorages/com.Roblox.Roblox",
+            std::string(home) + "/Library/HTTPStorages/com.roblox.RobloxPlayer",
+            std::string(home) + "/Library/WebKit/com.roblox.RobloxPlayer"
         };
         
         for (const auto& path : cachePaths) {

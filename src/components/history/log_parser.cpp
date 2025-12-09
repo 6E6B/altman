@@ -13,9 +13,24 @@
 using namespace std;
 namespace fs = filesystem;
 
-string logsFolder() {
-	const char *localAppDataPath = getenv("LOCALAPPDATA");
-	return localAppDataPath ? string(localAppDataPath) + "\\Roblox\\logs" : string{};
+std::string logsFolder() {
+    #ifdef _WIN32
+        const char *localAppDataPath = getenv("LOCALAPPDATA");
+        if (localAppDataPath) {
+            return std::string(localAppDataPath) + "\\Roblox\\logs";
+        }
+    #elif __APPLE__
+        const char *homePath = getenv("HOME");
+        if (homePath) {
+            return std::string(homePath) + "/Library/Logs/Roblox";
+        }
+    #else
+        const char *homePath = getenv("HOME");
+        if (homePath) {
+            return std::string(homePath) + "/Roblox/logs";
+        }
+    #endif
+    return std::string{};
 }
 
 void parseLogFile(LogInfo &logInfo) {
