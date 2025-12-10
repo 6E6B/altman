@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <string_view>
 #include <regex>
+#include <algorithm>
 
 #include "log_parser.h"
 
