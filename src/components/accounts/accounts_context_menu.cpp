@@ -24,16 +24,9 @@
 #include <memory>
 #include <algorithm>
 #include <cstring>
-
-// Cross-platform safe string copy
-#ifdef _WIN32
-    #define SAFE_STRNCPY(dst, src, size) strncpy_s(dst, size, src, _TRUNCATE)
-#else
-    #define SAFE_STRNCPY(dst, src, size) do { \
-        strncpy(dst, src, size - 1); \
-        dst[size - 1] = '\0'; \
-    } while(0)
-#endif
+#include <ranges>
+#include <format>
+#include <span>
 
 #include "utils/network/roblox.h"
 #include "ui/webview.hpp"
@@ -50,553 +43,665 @@
 #include "../../utils/core/account_utils.h"
 #include "../../utils/network/roblox/common.h"
 
-static char g_edit_note_buffer_ctx[1024];
-static int g_editing_note_for_account_id_ctx = -1;
+namespace {
+    constexpr int MULTI_EDIT_SENTINEL = -2;
+    constexpr int WEBVIEW_CONFIRM_THRESHOLD = 3;
 
-static bool g_openCustomUrlPopup = false;
-static int g_customUrlAccountId = -1;
-static char g_customUrlBuffer[256] = "";
+    struct EditNoteState {
+        char buffer[1024]{};
+        int accountId{-1};
+    };
 
-// Multi-selection custom URL popup state
-static bool g_openMultiCustomUrlPopup = false;
-static int g_multiCustomUrlAnchorId = -1;
-static char g_multiCustomUrlBuffer[256] = "";
+    struct UrlPopupState {
+        bool open{false};
+        int accountId{-1};
+        char buffer[256]{};
+    };
 
-// Deprecated local cache: use AccountData cached fields populated by background refresh
+    struct MultiUrlPopupState {
+        bool open{false};
+        int anchorAccountId{-1};
+        char buffer[256]{};
+    };
 
-using namespace ImGui;
-using namespace std;
+    EditNoteState g_editNote;
+    UrlPopupState g_customUrl;
+    MultiUrlPopupState g_multiUrl;
+    std::unordered_set<int> g_presenceFetchInFlight;
 
-template <typename Container, typename Pred>
-static inline void erase_if_local(Container &c, Pred p) {
-    c.erase(remove_if(c.begin(), c.end(), p), c.end());
-}
+    void copyInto(std::span<char> dst, std::string_view src) {
+        if (dst.empty()) {
+            return;
+        }
 
-void LaunchBrowserWithCookie(const AccountData &account) {
+        const std::size_t max_copy_len = dst.size() - 1;
+        const std::size_t len = std::min(src.size(), max_copy_len);
+        
+        std::copy(src.begin(), src.begin() + len, dst.begin());
+        
+        dst[len] = '\0';
+    }
+
+    std::vector<const AccountData*> getSelectedAccountsOrdered() {
+        std::vector<const AccountData*> result;
+        result.reserve(g_selectedAccountIds.size());
+        for (const auto& acc : g_accounts) {
+            if (g_selectedAccountIds.contains(acc.id)) {
+                result.push_back(&acc);
+            }
+        }
+        return result;
+    }
+
+    std::vector<AccountData*> getSelectedAccountsOrderedMutable() {
+        std::vector<AccountData*> result;
+        result.reserve(g_selectedAccountIds.size());
+        for (auto& acc : g_accounts) {
+            if (g_selectedAccountIds.contains(acc.id)) {
+                result.push_back(&acc);
+            }
+        }
+        return result;
+    }
+
+    template<typename Getter>
+    std::string joinSelectedField(const std::vector<const AccountData*>& accounts, Getter getter) {
+        std::string result;
+        for (const auto* acc : accounts) {
+            if (!result.empty()) result += '\n';
+            result += getter(*acc);
+        }
+        return result;
+    }
+
+    std::string generateBrowserTracker() {
+        thread_local std::mt19937_64 rng{std::random_device{}()};
+        thread_local std::uniform_int_distribution<int> d1(100000, 130000);
+        thread_local std::uniform_int_distribution<int> d2(100000, 900000);
+        return std::to_string(d1(rng)) + std::to_string(d2(rng));
+    }
+
+    std::string generateLaunchUri(std::string_view ticket, std::string_view placeId, std::string_view jobId) {
+        const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        
+        std::string placeLauncherUrl = std::format(
+            "https://assetgame.roblox.com/game/PlaceLauncher.ashx?request=RequestGame%26placeId={}", placeId);
+        
+        if (!jobId.empty()) {
+            placeLauncherUrl += std::format("%26gameId={}", jobId);
+        }
+
+        return std::format(
+            "roblox-player://1/1+launchmode:play+gameinfo:{}+launchtime:{}+browsertrackerid:{}+placelauncherurl:{}+robloxLocale:en_us+gameLocale:en_us",
+            ticket, nowMs, generateBrowserTracker(), placeLauncherUrl
+        );
+    }
+
+    void asyncFetchPresence(int accountId, std::string_view userId, std::string_view cookie) {
+        if (g_presenceFetchInFlight.contains(accountId)) return;
+        
+        g_presenceFetchInFlight.insert(accountId);
+        Threading::newThread([accountId, userIdStr = std::string(userId), cookieCopy = std::string(cookie)]() {
+            try {
+                const uint64_t uid = std::stoull(userIdStr);
+                const auto presenceMap = Roblox::getPresences({uid}, cookieCopy);
+                
+                if (const auto it = presenceMap.find(uid); it != presenceMap.end()) {
+                    for (auto& acc : g_accounts) {
+                        if (acc.id == accountId) {
+                            acc.placeId = it->second.placeId;
+                            acc.jobId = it->second.jobId;
+                            break;
+                        }
+                    }
+                }
+            } catch (...) {
+                // Silently handle errors
+            }
+            g_presenceFetchInFlight.erase(accountId);
+        });
+    }
+
+    void renderCopyInfoMenuSingle(const AccountData& account) {
+        if (ImGui::MenuItem("Display Name")) {
+            ImGui::SetClipboardText(account.displayName.c_str());
+        }
+        if (ImGui::MenuItem("Username")) {
+            ImGui::SetClipboardText(account.username.c_str());
+        }
+        if (ImGui::MenuItem("User ID")) {
+            ImGui::SetClipboardText(account.userId.c_str());
+        }
+        
+        ImGui::Separator();
+        
+        const bool hasCookie = !account.cookie.empty();
+        
+        ImGui::PushStyleColor(ImGuiCol_Text, getStatusColor("Warned"));
+        if (ImGui::MenuItem("Cookie", nullptr, false, hasCookie)) {
+            ImGui::SetClipboardText(account.cookie.c_str());
+        }
+        ImGui::PopStyleColor();
+        
+        ImGui::PushStyleColor(ImGuiCol_Text, getStatusColor("Warned"));
+        if (ImGui::MenuItem("Launch Link", nullptr, false, hasCookie)) {
+            Threading::newThread([cookie = account.cookie, 
+                                 placeId = std::string(join_value_buf),
+                                 jobId = std::string(join_jobid_buf)]() {
+                const auto ticket = Roblox::fetchAuthTicket(cookie);
+                if (ticket.empty()) return;
+                
+                const auto uri = generateLaunchUri(ticket, placeId, jobId);
+                ImGui::SetClipboardText(uri.c_str());
+            });
+        }
+        ImGui::PopStyleColor();
+    }
+
+    void renderCopyInfoMenuMulti(const std::vector<const AccountData*>& selectedAccounts) {
+        if (ImGui::MenuItem("Display Name")) {
+            const auto text = joinSelectedField(selectedAccounts, 
+                [](const auto& a) { return a.displayName; });
+            ImGui::SetClipboardText(text.c_str());
+        }
+        if (ImGui::MenuItem("Username")) {
+            const auto text = joinSelectedField(selectedAccounts,
+                [](const auto& a) { return a.username; });
+            ImGui::SetClipboardText(text.c_str());
+        }
+        if (ImGui::MenuItem("User ID")) {
+            const auto text = joinSelectedField(selectedAccounts,
+                [](const auto& a) { return a.userId; });
+            ImGui::SetClipboardText(text.c_str());
+        }
+        
+        ImGui::Separator();
+        
+        const bool anyCookie = std::ranges::any_of(selectedAccounts, 
+            [](const auto* acc) { return !acc->cookie.empty(); });
+        
+        ImGui::PushStyleColor(ImGuiCol_Text, getStatusColor("Warned"));
+        if (ImGui::MenuItem("Cookie", nullptr, false, anyCookie)) {
+            std::string result;
+            for (const auto* acc : selectedAccounts) {
+                if (acc->cookie.empty()) continue;
+                if (!result.empty()) result += '\n';
+                result += acc->cookie;
+            }
+            if (!result.empty()) {
+                ImGui::SetClipboardText(result.c_str());
+            }
+        }
+        ImGui::PopStyleColor();
+        
+        ImGui::PushStyleColor(ImGuiCol_Text, getStatusColor("Warned"));
+        if (ImGui::MenuItem("Launch Link", nullptr, false, anyCookie)) {
+            std::vector<std::pair<int, std::string>> accounts;
+            accounts.reserve(selectedAccounts.size());
+            for (const auto* acc : selectedAccounts) {
+                if (!acc->cookie.empty()) {
+                    accounts.emplace_back(acc->id, acc->cookie);
+                }
+            }
+            
+            Threading::newThread([accounts, 
+                                 placeId = std::string(join_value_buf),
+                                 jobId = std::string(join_jobid_buf)]() {
+                std::string result;
+                for (const auto& [id, cookie] : accounts) {
+                    const auto ticket = Roblox::fetchAuthTicket(cookie);
+                    if (ticket.empty()) continue;
+                    
+                    if (!result.empty()) result += '\n';
+                    result += generateLaunchUri(ticket, placeId, jobId);
+                }
+                if (!result.empty()) {
+                    ImGui::SetClipboardText(result.c_str());
+                }
+            });
+        }
+        ImGui::PopStyleColor();
+    }
+
+    void renderNoteMenuSingle(AccountData& account) {
+        if (ImGui::MenuItem("Copy Note")) {
+            ImGui::SetClipboardText(account.note.c_str());
+        }
+        
+        if (ImGui::BeginMenu("Edit Note")) {
+            if (g_editNote.accountId != account.id) {
+                copyInto(g_editNote.buffer, account.note);
+                g_editNote.accountId = account.id;
+            }
+            
+            ImGui::PushItemWidth(ImGui::GetFontSize() * 15.625f);
+            ImGui::InputTextMultiline("##EditNoteInput", g_editNote.buffer, sizeof(g_editNote.buffer),
+                                     ImVec2(0, ImGui::GetTextLineHeight() * 4));
+            ImGui::PopItemWidth();
+            
+            if (ImGui::Button("Save##Note")) {
+                if (g_editNote.accountId == account.id) {
+                    account.note = g_editNote.buffer;
+                    Data::SaveAccounts();
+                }
+                g_editNote.accountId = -1;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndMenu();
+        }
+        
+        ImGui::Separator();
+        ImGui::PushStyleColor(ImGuiCol_Text, getStatusColor("Banned"));
+        if (ImGui::MenuItem("Clear Note")) {
+            account.note.clear();
+            Data::SaveAccounts();
+        }
+        ImGui::PopStyleColor();
+    }
+
+    void renderNoteMenuMulti(std::vector<AccountData*>& selectedAccounts) {
+        if (ImGui::MenuItem("Copy Note")) {
+            std::string result;
+            for (const auto* acc : selectedAccounts) {
+                if (!result.empty()) result += '\n';
+                result += acc->note;
+            }
+            ImGui::SetClipboardText(result.c_str());
+        }
+        
+        if (ImGui::BeginMenu("Edit Note")) {
+            if (g_editNote.accountId != MULTI_EDIT_SENTINEL) {
+                const auto& firstNote = selectedAccounts.empty() ? std::string() : selectedAccounts.front()->note;
+                const bool allSame = std::ranges::all_of(selectedAccounts,
+                    [&firstNote](const auto* acc) { return acc->note == firstNote; });
+                
+                copyInto(g_editNote.buffer, allSame ? std::string_view(firstNote) : std::string_view());
+
+                g_editNote.accountId = MULTI_EDIT_SENTINEL;
+            }
+            
+            ImGui::PushItemWidth(ImGui::GetFontSize() * 15.625f);
+            ImGui::InputTextMultiline("##EditNoteInput", g_editNote.buffer, sizeof(g_editNote.buffer),
+                                     ImVec2(0, ImGui::GetTextLineHeight() * 4));
+            ImGui::PopItemWidth();
+            
+            if (ImGui::Button("Save All##Note")) {
+                for (auto* acc : selectedAccounts) {
+                    acc->note = g_editNote.buffer;
+                }
+                Data::SaveAccounts();
+                g_editNote.accountId = -1;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndMenu();
+        }
+        
+        ImGui::Separator();
+        ImGui::PushStyleColor(ImGuiCol_Text, getStatusColor("Banned"));
+        if (ImGui::MenuItem("Clear Note")) {
+            for (auto* acc : selectedAccounts) {
+                acc->note.clear();
+            }
+            Data::SaveAccounts();
+        }
+        ImGui::PopStyleColor();
+    }
+
+    void renderBrowserMenuSingle(const AccountData& account) {
+        const auto open = [&account](std::string_view url) {
+            if (!account.cookie.empty()) {
+                LaunchWebview(std::string(url), account);
+            }
+        };
+        
+        if (ImGui::MenuItem("Home Page")) open("https://www.roblox.com/home");
+        if (ImGui::MenuItem("Settings")) open("https://www.roblox.com/my/account");
+        if (ImGui::MenuItem("Profile")) open(std::format("https://www.roblox.com/users/{}/profile", account.userId));
+        if (ImGui::MenuItem("Messages")) open("https://www.roblox.com/my/messages");
+        if (ImGui::MenuItem("Friends")) open("https://www.roblox.com/users/friends");
+        if (ImGui::MenuItem("Avatar")) open("https://www.roblox.com/my/avatar");
+        if (ImGui::MenuItem("Inventory")) open(std::format("https://www.roblox.com/users/{}/inventory", account.userId));
+        if (ImGui::MenuItem("Favorites")) open(std::format("https://www.roblox.com/users/{}/favorites", account.userId));
+        if (ImGui::MenuItem("Trades")) open("https://www.roblox.com/trades");
+        if (ImGui::MenuItem("Transactions")) open("https://www.roblox.com/transactions");
+        if (ImGui::MenuItem("Groups")) open("https://www.roblox.com/communities");
+        if (ImGui::MenuItem("Catalog")) open("https://www.roblox.com/catalog");
+        if (ImGui::MenuItem("Creator Hub")) open("https://create.roblox.com/dashboard/creations");
+        
+        ImGui::Separator();
+        if (ImGui::MenuItem("Custom URL")) {
+            g_customUrl.open = true;
+            g_customUrl.accountId = account.id;
+            g_customUrl.buffer[0] = '\0';
+        }
+    }
+
+    void renderBrowserMenuMulti(const std::vector<const AccountData*>& selectedAccounts, int anchorId) {
+        const auto openMany = [&selectedAccounts](std::string_view url) {
+            const int eligible = std::ranges::count_if(selectedAccounts,
+                [](const auto* acc) { return !acc->cookie.empty(); });
+            
+            const auto launchAll = [selectedAccounts, urlCopy = std::string(url)]() {
+                for (const auto* acc : selectedAccounts) {
+                    if (!acc->cookie.empty()) {
+                        LaunchWebview(urlCopy, *acc);
+                    }
+                }
+            };
+            
+            if (eligible >= WEBVIEW_CONFIRM_THRESHOLD) {
+                ConfirmPopup::Add(std::format("Open {} webviews?", eligible), launchAll);
+            } else {
+                launchAll();
+            }
+        };
+        
+        const auto openManyPersonal = [&selectedAccounts](auto urlGenerator) {
+            const int eligible = std::ranges::count_if(selectedAccounts,
+                [](const auto* acc) { return !acc->cookie.empty(); });
+            
+            const auto launchAll = [selectedAccounts, urlGenerator]() {
+                for (const auto* acc : selectedAccounts) {
+                    if (!acc->cookie.empty()) {
+                        LaunchWebview(urlGenerator(*acc), *acc);
+                    }
+                }
+            };
+            
+            if (eligible >= WEBVIEW_CONFIRM_THRESHOLD) {
+                ConfirmPopup::Add("Open webviews?", launchAll);
+            } else {
+                launchAll();
+            }
+        };
+        
+        if (ImGui::MenuItem("Home Page")) openMany("https://www.roblox.com/home");
+        if (ImGui::MenuItem("Settings")) openMany("https://www.roblox.com/my/account");
+        if (ImGui::MenuItem("Profile")) {
+            openManyPersonal([](const AccountData& acc) {
+                return std::format("https://www.roblox.com/users/{}/profile", acc.userId);
+            });
+        }
+        if (ImGui::MenuItem("Messages")) openMany("https://www.roblox.com/my/messages");
+        if (ImGui::MenuItem("Friends")) openMany("https://www.roblox.com/users/friends");
+        if (ImGui::MenuItem("Avatar")) openMany("https://www.roblox.com/my/avatar");
+        if (ImGui::MenuItem("Inventory")) {
+            openManyPersonal([](const AccountData& acc) {
+                return std::format("https://www.roblox.com/users/{}/inventory", acc.userId);
+            });
+        }
+        if (ImGui::MenuItem("Favorites")) {
+            openManyPersonal([](const AccountData& acc) {
+                return std::format("https://www.roblox.com/users/{}/favorites", acc.userId);
+            });
+        }
+        if (ImGui::MenuItem("Trades")) openMany("https://www.roblox.com/trades");
+        if (ImGui::MenuItem("Transactions")) openMany("https://www.roblox.com/transactions");
+        if (ImGui::MenuItem("Groups")) openMany("https://www.roblox.com/communities");
+        if (ImGui::MenuItem("Catalog")) openMany("https://www.roblox.com/catalog");
+        if (ImGui::MenuItem("Creator Hub")) openMany("https://create.roblox.com/dashboard/creations");
+        
+        ImGui::Separator();
+        if (ImGui::MenuItem("Custom URL")) {
+            g_multiUrl.open = true;
+            g_multiUrl.anchorAccountId = anchorId;
+            g_multiUrl.buffer[0] = '\0';
+        }
+    }
+
+    void renderInGameMenuSingle(const AccountData& account) {
+        const uint64_t placeId = account.placeId;
+        const std::string jobId = account.jobId;
+        
+        if (!placeId) {
+            ImGui::Separator();
+            ImGui::TextDisabled("Fetching server info...");
+            return;
+        }
+        
+        ImGui::Separator();
+        StandardJoinMenuParams menu{};
+        menu.placeId = placeId;
+        menu.jobId = jobId;
+        
+        menu.onLaunchGame = [placeId, &account]() {
+            std::vector<std::pair<int, std::string>> accounts;
+            if (AccountFilters::IsAccountUsable(account)) {
+                accounts.emplace_back(account.id, account.cookie);
+            }
+            if (!accounts.empty()) {
+                Threading::newThread([placeId, accounts]() {
+                    launchRobloxSequential(LaunchParams::standard(placeId), accounts);
+                });
+            }
+        };
+        
+        menu.onLaunchInstance = [placeId, jobId, &account]() {
+            if (jobId.empty()) return;
+            std::vector<std::pair<int, std::string>> accounts;
+            if (AccountFilters::IsAccountUsable(account)) {
+                accounts.emplace_back(account.id, account.cookie);
+            }
+            if (!accounts.empty()) {
+                Threading::newThread([placeId, jobId, accounts]() {
+                    launchRobloxSequential(LaunchParams::gameJob(placeId, jobId), accounts);
+                });
+            }
+        };
+        
+        menu.onFillGame = [placeId]() { FillJoinOptions(placeId, ""); };
+        menu.onFillInstance = [placeId, jobId]() {
+            if (!jobId.empty()) FillJoinOptions(placeId, jobId);
+        };
+        
+        RenderStandardJoinMenu(menu);
+    }
+
+    void renderUrlPopups(const AccountData& account) {
+        // Single account custom URL popup
+        if (g_customUrl.open && g_customUrl.accountId == account.id) {
+            ImGui::OpenPopup(std::format("Custom URL##Acct{}", account.id).c_str());
+            g_customUrl.open = false;
+        }
+        
+        const auto popupName = std::format("Custom URL##Acct{}", account.id);
+        if (ImGui::BeginPopupModal(popupName.c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            const auto& style = ImGui::GetStyle();
+            const float openWidth = ImGui::CalcTextSize("Open").x + style.FramePadding.x * 2.0f;
+            const float cancelWidth = ImGui::CalcTextSize("Cancel").x + style.FramePadding.x * 2.0f;
+            const float inputWidth = std::max(100.0f, 
+                ImGui::GetContentRegionAvail().x - openWidth - cancelWidth - style.ItemSpacing.x);
+            
+            ImGui::PushItemWidth(inputWidth);
+            ImGui::InputTextWithHint("##AcctUrl", "Enter URL", g_customUrl.buffer, sizeof(g_customUrl.buffer));
+            ImGui::PopItemWidth();
+            ImGui::Spacing();
+            
+            if (ImGui::Button("Open", ImVec2(openWidth, 0)) && g_customUrl.buffer[0] != '\0') {
+                LaunchWebview(g_customUrl.buffer, account);
+                g_customUrl.buffer[0] = '\0';
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine(0, style.ItemSpacing.x);
+            if (ImGui::Button("Cancel", ImVec2(cancelWidth, 0))) {
+                g_customUrl.buffer[0] = '\0';
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
+        
+        // Multi-account custom URL popup
+        if (g_multiUrl.open && g_multiUrl.anchorAccountId == account.id) {
+            ImGui::OpenPopup("Custom URL##Multiple");
+            g_multiUrl.open = false;
+        }
+        
+        if (ImGui::BeginPopupModal("Custom URL##Multiple", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            const auto& style = ImGui::GetStyle();
+            const float openWidth = ImGui::CalcTextSize("Open").x + style.FramePadding.x * 2.0f;
+            const float cancelWidth = ImGui::CalcTextSize("Cancel").x + style.FramePadding.x * 2.0f;
+            const float inputWidth = std::max(100.0f,
+                ImGui::GetContentRegionAvail().x - openWidth - cancelWidth - style.ItemSpacing.x);
+            
+            ImGui::PushItemWidth(inputWidth);
+            ImGui::InputTextWithHint("##MultiUrl", "Enter URL", g_multiUrl.buffer, sizeof(g_multiUrl.buffer));
+            ImGui::PopItemWidth();
+            ImGui::Spacing();
+            
+            if (ImGui::Button("Open", ImVec2(openWidth, 0)) && g_multiUrl.buffer[0] != '\0') {
+                for (auto& acc : g_accounts) {
+                    if (g_selectedAccountIds.contains(acc.id) && !acc.cookie.empty()) {
+                        LaunchWebview(g_multiUrl.buffer, acc);
+                    }
+                }
+                g_multiUrl.buffer[0] = '\0';
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine(0, style.ItemSpacing.x);
+            if (ImGui::Button("Cancel", ImVec2(cancelWidth, 0))) {
+                g_multiUrl.buffer[0] = '\0';
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
+    }
+
+} 
+
+void LaunchBrowserWithCookie(const AccountData& account) {
     if (account.cookie.empty()) {
         LOG_WARN("Cannot open browser - cookie is empty for account: " + account.displayName);
         return;
     }
-
     LOG_INFO("Launching WebView2 browser for account: " + account.displayName);
-
     LaunchWebview("https://www.roblox.com/home", account);
 }
 
-static std::unordered_set<int> g_presenceFetchInFlight;
-
-void RenderAccountContextMenu(AccountData &account, const string &unique_context_menu_id) {
-    // No-op: rely on AccountData cached fields
-
-    if (BeginPopupContextItem(unique_context_menu_id.c_str())) {
-        bool isMultiSelectionContext = (g_selectedAccountIds.size() > 1) && (g_selectedAccountIds.find(account.id) != g_selectedAccountIds.end());
-        // If user is InGame but cached placeId/jobId are missing, kick off a non-blocking fetch once
-        if (IsWindowAppearing()) {
-            if (account.status == "InGame" && account.placeId == 0 && !account.userId.empty()) {
-                if (g_presenceFetchInFlight.find(account.id) == g_presenceFetchInFlight.end()) {
-                    g_presenceFetchInFlight.insert(account.id);
-                    Threading::newThread([acctId = account.id, userIdStr = account.userId, cookie = account.cookie]() {
-                        try {
-                            uint64_t uid = stoull(userIdStr);
-                            auto pres = Roblox::getPresences({uid}, cookie);
-                            auto it = pres.find(uid);
-                            if (it != pres.end()) {
-                                for (auto &a : g_accounts) {
-                                    if (a.id == acctId) {
-                                        a.placeId = it->second.placeId;
-                                        a.jobId = it->second.jobId;
-                                        break;
-                                    }
-                                }
-                            }
-                        } catch (...) {
-                        }
-                        g_presenceFetchInFlight.erase(acctId);
-                    });
-                }
-            }
+void RenderAccountContextMenu(AccountData& account, const std::string& uniqueContextMenuId) {
+    if (!ImGui::BeginPopupContextItem(uniqueContextMenuId.c_str())) {
+        renderUrlPopups(account);
+        return;
+    }
+    
+    const bool isMultiSelection = (g_selectedAccountIds.size() > 1) && 
+                                  g_selectedAccountIds.contains(account.id);
+    
+    // Async presence fetch if needed
+    if (ImGui::IsWindowAppearing()) {
+        if (account.status == "InGame" && account.placeId == 0 && !account.userId.empty()) {
+            asyncFetchPresence(account.id, account.userId, account.cookie);
         }
-
-        if (isMultiSelectionContext) {
-            TextUnformatted("Multiple Accounts");
-            Separator();
+    }
+    
+    // Header
+    if (isMultiSelection) {
+        ImGui::TextUnformatted("Multiple Accounts");
+        ImGui::Separator();
+    } else {
+        ImGui::TextUnformatted("Account: ");
+        ImGui::SameLine(0, 0);
+        const ImVec4 nameColor = getStatusColor(account.status);
+        ImGui::PushStyleColor(ImGuiCol_Text, nameColor);
+        ImGui::TextUnformatted(account.displayName.empty() ? account.username.c_str() : account.displayName.c_str());
+        ImGui::PopStyleColor();
+        
+        if (g_selectedAccountIds.contains(account.id)) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("(Selected)");
+        }
+        ImGui::Separator();
+    }
+    
+    // Copy Info submenu
+    if (ImGui::BeginMenu("Copy Info")) {
+        if (isMultiSelection) {
+            renderCopyInfoMenuMulti(getSelectedAccountsOrdered());
         } else {
-            TextUnformatted("Account: ");
-            SameLine(0, 0);
-            ImVec4 nameCol = getStatusColor(account.status);
-            PushStyleColor(ImGuiCol_Text, nameCol);
-            TextUnformatted(account.displayName.empty() ? account.username.c_str() : account.displayName.c_str());
-            PopStyleColor();
-            if (g_selectedAccountIds.find(account.id) != g_selectedAccountIds.end()) {
-                SameLine();
-                TextDisabled("(Selected)");
-            }
-            Separator();
+            renderCopyInfoMenuSingle(account);
         }
-
-        // Copy Info submenu
-        if (BeginMenu("Copy Info")) {
-            if (isMultiSelectionContext) {
-                // Build ordered selection list based on g_accounts order
-                vector<const AccountData*> selectedAccounts;
-                selectedAccounts.reserve(g_selectedAccountIds.size());
-                for (const auto &a : g_accounts) {
-                    if (g_selectedAccountIds.find(a.id) != g_selectedAccountIds.end()) selectedAccounts.push_back(&a);
-                }
-                auto joinField = [&](auto getter) {
-                    string out;
-                    for (const AccountData* ap : selectedAccounts) {
-                        string v = getter(*ap);
-                        if (!out.empty()) out += "\n";
-                        out += v;
-                    }
-                    return out;
-                };
-                if (MenuItem("Display Name")) {
-                    auto s = joinField([](const AccountData &a) { return a.displayName; });
-                    SetClipboardText(s.c_str());
-                }
-                if (MenuItem("Username")) {
-                    auto s = joinField([](const AccountData &a) { return a.username; });
-                    SetClipboardText(s.c_str());
-                }
-                if (MenuItem("User ID")) {
-                    auto s = joinField([](const AccountData &a) { return a.userId; });
-                    SetClipboardText(s.c_str());
-                }
-                Separator();
-                bool anyCookie = any_of(selectedAccounts.begin(), selectedAccounts.end(), [](const AccountData* ap){ return !ap->cookie.empty(); });
-                {
-                    PushStyleColor(ImGuiCol_Text, getStatusColor("Warned"));
-                    bool clicked = MenuItem("Cookie", nullptr, false, anyCookie);
-                    PopStyleColor();
-                    if (clicked) {
-                        string s;
-                        for (const AccountData* ap : selectedAccounts) {
-                            if (ap->cookie.empty()) continue;
-                            if (!s.empty()) s += "\n";
-                            s += ap->cookie;
-                        }
-                        if (!s.empty()) SetClipboardText(s.c_str());
-                    }
-                }
-                {
-                    PushStyleColor(ImGuiCol_Text, getStatusColor("Warned"));
-                    bool clicked = MenuItem("Launch Link", nullptr, false, anyCookie);
-                    PopStyleColor();
-                    if (clicked) {
-                        vector<pair<int,string>> accs;
-                        for (const AccountData* ap : selectedAccounts) if (!ap->cookie.empty()) accs.emplace_back(ap->id, ap->cookie);
-                        string place_id_str = join_value_buf;
-                        string job_id_str = join_jobid_buf;
-                        Threading::newThread([accs, place_id_str, job_id_str]() {
-                            bool hasJob = !job_id_str.empty();
-                            auto now_ms = chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count();
-                            thread_local mt19937_64 rng{random_device{}()};
-                            static uniform_int_distribution<int> d1(100000, 130000), d2(100000, 900000);
-                            string out;
-                            for (auto &p : accs) {
-                                string ticket = Roblox::fetchAuthTicket(p.second);
-                                if (ticket.empty()) continue;
-                                string browserTracker = to_string(d1(rng)) + to_string(d2(rng));
-                                string placeLauncherUrl =
-                                    "https://assetgame.roblox.com/game/PlaceLauncher.ashx?request=RequestGame%26placeId=" + place_id_str;
-                                if (hasJob) { placeLauncherUrl += "%26gameId=" + job_id_str; }
-                                string uri = string("roblox-player://1/1+launchmode:play")
-                                    + "+gameinfo:" + ticket
-                                    + "+launchtime:" + to_string(now_ms)
-                                    + "+browsertrackerid:" + browserTracker
-                                    + "+placelauncherurl:" + placeLauncherUrl
-                                    + "+robloxLocale:en_us+gameLocale:en_us";
-                                if (!out.empty()) out += "\n";
-                                out += uri;
-                            }
-                            if (!out.empty()) SetClipboardText(out.c_str());
-                        });
-                    }
-                }
-                ImGui::EndMenu();
-            } else {
-                if (MenuItem("Display Name")) SetClipboardText(account.displayName.c_str());
-                if (MenuItem("Username")) SetClipboardText(account.username.c_str());
-                if (MenuItem("User ID")) SetClipboardText(account.userId.c_str());
-                Separator();
-                {
-                    PushStyleColor(ImGuiCol_Text, getStatusColor("Warned"));
-                    bool clicked = MenuItem("Cookie", nullptr, false, !account.cookie.empty());
-                    PopStyleColor();
-                    if (clicked) {
-                        SetClipboardText(account.cookie.c_str());
-                    }
-                }
-                {
-                    PushStyleColor(ImGuiCol_Text, getStatusColor("Warned"));
-                    bool clicked = MenuItem("Launch Link", nullptr, false, !account.cookie.empty());
-                    PopStyleColor();
-                    if (clicked) {
-                        string acc_cookie = account.cookie;
-                        string place_id_str = join_value_buf;
-                        string job_id_str = join_jobid_buf;
-                        Threading::newThread(
-                            [acc_cookie, place_id_str, job_id_str, account_id = account.id, account_display_name = account.displayName] {
-                                bool hasJob = !job_id_str.empty();
-                                auto now_ms = chrono::duration_cast<chrono::milliseconds>(
-                                    chrono::system_clock::now().time_since_epoch()).count();
-                                thread_local mt19937_64 rng{random_device{}()};
-                                static uniform_int_distribution<int> d1(100000, 130000), d2(100000, 900000);
-                                string browserTracker = to_string(d1(rng)) + to_string(d2(rng));
-                                string ticket = Roblox::fetchAuthTicket(acc_cookie);
-                                if (ticket.empty()) return;
-                                string placeLauncherUrl =
-                                        "https://assetgame.roblox.com/game/PlaceLauncher.ashx?request=RequestGame%26placeId="
-                                        + place_id_str;
-                                if (hasJob) { placeLauncherUrl += "%26gameId=" + job_id_str; }
-                                string uri =
-                                        string("roblox-player://1/1+launchmode:play")
-                                        + "+gameinfo:" + ticket
-                                        + "+launchtime:" + to_string(now_ms)
-                                        + "+browsertrackerid:" + browserTracker
-                                        + "+placelauncherurl:" + placeLauncherUrl
-                                        + "+robloxLocale:en_us+gameLocale:en_us";
-                                SetClipboardText(uri.c_str());
-                            });
-                    }
-                }
-                ImGui::EndMenu();
-            }
+        ImGui::EndMenu();
+    }
+    
+    // Note submenu
+    if (ImGui::BeginMenu("Note")) {
+        if (isMultiSelection) {
+            auto selectedAccounts = getSelectedAccountsOrderedMutable();
+            renderNoteMenuMulti(selectedAccounts);
+        } else {
+            renderNoteMenuSingle(account);
         }
-
-        // Note submenu (supports single and multi selection)
-        if (BeginMenu("Note")) {
-            if (isMultiSelectionContext) {
-                // Build ordered selection list based on g_accounts order
-                vector<AccountData*> selectedAccounts;
-                selectedAccounts.reserve(g_selectedAccountIds.size());
-                for (auto &a : g_accounts) {
-                    if (g_selectedAccountIds.find(a.id) != g_selectedAccountIds.end()) selectedAccounts.push_back(&a);
-                }
-
-                if (MenuItem("Copy Note")) {
-                    string out;
-                    for (const AccountData* ap : selectedAccounts) {
-                        if (!out.empty()) out += "\n";
-                        out += ap->note;
-                    }
-                    SetClipboardText(out.c_str());
-                }
-                if (BeginMenu("Edit Note")) {
-                    // Initialize edit buffer once per open for multi-edit using sentinel id -2
-                    if (g_editing_note_for_account_id_ctx != -2) {
-                        string firstNote = selectedAccounts.empty() ? string() : selectedAccounts.front()->note;
-                        bool allSame = true;
-                        for (const AccountData* ap : selectedAccounts) {
-                            if (ap->note != firstNote) { allSame = false; break; }
-                        }
-                        const string &initial = allSame ? firstNote : string();
-                        SAFE_STRNCPY(g_edit_note_buffer_ctx, initial.c_str(), sizeof(g_edit_note_buffer_ctx));
-                        g_edit_note_buffer_ctx[sizeof(g_edit_note_buffer_ctx) - 1] = '\0';
-                        g_editing_note_for_account_id_ctx = -2;
-                    }
-                    PushItemWidth(GetFontSize() * 15.625f);
-                    InputTextMultiline("##EditNoteInput", g_edit_note_buffer_ctx, sizeof(g_edit_note_buffer_ctx), ImVec2(0, GetTextLineHeight() * 4));
-                    PopItemWidth();
-                    if (Button("Save All##Note")) {
-                        for (auto *ap : selectedAccounts) {
-                            ap->note = g_edit_note_buffer_ctx;
-                        }
-                        Data::SaveAccounts();
-                        g_editing_note_for_account_id_ctx = -1;
-                        CloseCurrentPopup();
-                    }
-                    ImGui::EndMenu();
-                }
-                Separator();
-                {
-                    PushStyleColor(ImGuiCol_Text, getStatusColor("Banned"));
-                    if (MenuItem("Clear Note")) {
-                        for (auto *ap : selectedAccounts) { ap->note.clear(); }
-                        Data::SaveAccounts();
-                    }
-                    PopStyleColor();
-                }
-                ImGui::EndMenu();
-            } else {
-                if (MenuItem("Copy Note")) SetClipboardText(account.note.c_str());
-                if (BeginMenu("Edit Note")) {
-                    if (g_editing_note_for_account_id_ctx != account.id) {
-                        SAFE_STRNCPY(g_edit_note_buffer_ctx, account.note.c_str(), sizeof(g_edit_note_buffer_ctx));
-                        g_edit_note_buffer_ctx[sizeof(g_edit_note_buffer_ctx) - 1] = '\0';
-                        g_editing_note_for_account_id_ctx = account.id;
-                    }
-                    PushItemWidth(GetFontSize() * 15.625f);
-                    InputTextMultiline("##EditNoteInput", g_edit_note_buffer_ctx, sizeof(g_edit_note_buffer_ctx), ImVec2(0, GetTextLineHeight() * 4));
-                    PopItemWidth();
-                    if (Button("Save##Note")) {
-                        if (g_editing_note_for_account_id_ctx == account.id) {
-                            account.note = g_edit_note_buffer_ctx;
-                            Data::SaveAccounts();
-                        }
-                        g_editing_note_for_account_id_ctx = -1;
-                        CloseCurrentPopup();
-                    }
-                    ImGui::EndMenu();
-                }
-                Separator();
-                {
-                    PushStyleColor(ImGuiCol_Text, getStatusColor("Banned"));
-                    if (MenuItem("Clear Note")) {
-                        account.note.clear();
-                        Data::SaveAccounts();
-                    }
-                    PopStyleColor();
-                }
-                ImGui::EndMenu();
-            }
+        ImGui::EndMenu();
+    }
+    
+    // Browser submenu
+    if (ImGui::BeginMenu("Browser")) {
+        if (isMultiSelection) {
+            renderBrowserMenuMulti(getSelectedAccountsOrdered(), account.id);
+        } else {
+            renderBrowserMenuSingle(account);
         }
-
-
-        // Browser submenu (moved above in-game section)
-        if (BeginMenu("Browser")) {
-            if (isMultiSelectionContext) {
-                // Build ordered selection list
-                vector<const AccountData*> selectedAccounts;
-                selectedAccounts.reserve(g_selectedAccountIds.size());
-                for (const auto &a : g_accounts) {
-                    if (g_selectedAccountIds.find(a.id) != g_selectedAccountIds.end()) selectedAccounts.push_back(&a);
-                }
-                auto openMany = [&](const string &url) {
-                    int countEligible = 0;
-                    for (const AccountData* ap : selectedAccounts) if (!ap->cookie.empty()) ++countEligible;
-                    auto launchAll = [selectedAccounts, url]() {
-                        for (const AccountData* ap : selectedAccounts) {
-                            if (!ap->cookie.empty()) LaunchWebview(url, *ap);
-                        }
-                    };
-                    if (countEligible >= 3) {
-                        char buf[128];
-                        snprintf(buf, sizeof(buf), "Open %d webviews?", countEligible);
-                        ConfirmPopup::Add(buf, launchAll);
-                    } else {
-                        launchAll();
+        ImGui::EndMenu();
+    }
+    
+    // In-game section (single account only)
+    if (!isMultiSelection && account.status == "InGame") {
+        renderInGameMenuSingle(account);
+    }
+    
+    ImGui::Separator();
+    
+    // Set default account (single only)
+    if (!isMultiSelection) {
+        if (ImGui::MenuItem("Set as Default Account")) {
+            g_defaultAccountId = account.id;
+            g_selectedAccountIds.clear();
+            g_selectedAccountIds.insert(account.id);
+            Data::SaveSettings("settings.json");
+        }
+    }
+    
+    // Removal
+    if (isMultiSelection) {
+        const int removeCount = static_cast<int>(g_selectedAccountIds.size());
+        ImGui::PushStyleColor(ImGuiCol_Text, getStatusColor("Terminated"));
+        
+        if (ImGui::MenuItem(std::format("Remove {} Accounts", removeCount).c_str())) {
+            std::vector<int> idsToRemove(g_selectedAccountIds.begin(), g_selectedAccountIds.end());
+            ConfirmPopup::Add(
+                std::format("Delete {} accounts?", removeCount),
+                [idsToRemove]() {
+                    const std::unordered_set<int> toRemove(idsToRemove.begin(), idsToRemove.end());
+                    std::erase_if(g_accounts, [&toRemove](const auto& acc) {
+                        return toRemove.contains(acc.id);
+                    });
+                    for (const int id : idsToRemove) {
+                        g_selectedAccountIds.erase(id);
                     }
-                };
-                if (MenuItem("Home Page")) openMany("https://www.roblox.com/home");
-                if (MenuItem("Settings")) openMany("https://www.roblox.com/my/account");
-                if (MenuItem("Profile")) {
-                    // per-account URLs; open individually
-                    int countEligible = 0;
-                    for (const AccountData* ap : selectedAccounts) if (!ap->cookie.empty()) ++countEligible;
-                    auto launchAll = [selectedAccounts]() {
-                        for (const AccountData* ap : selectedAccounts) {
-                            if (!ap->cookie.empty()) LaunchWebview("https://www.roblox.com/users/" + ap->userId + "/profile", *ap);
-                        }
-                    };
-                    if (countEligible >= 3) { ConfirmPopup::Add("Open profile webviews?", launchAll); } else { launchAll(); }
-                }
-                if (MenuItem("Messages")) openMany("https://www.roblox.com/my/messages");
-                if (MenuItem("Friends")) openMany("https://www.roblox.com/users/friends");
-                if (MenuItem("Avatar")) openMany("https://www.roblox.com/my/avatar");
-                if (MenuItem("Inventory")) {
-                    int countEligible = 0;
-                    for (const AccountData* ap : selectedAccounts) if (!ap->cookie.empty()) ++countEligible;
-                    auto launchAll = [selectedAccounts]() {
-                        for (const AccountData* ap : selectedAccounts) {
-                            if (!ap->cookie.empty()) LaunchWebview("https://www.roblox.com/users/" + ap->userId + "/inventory", *ap);
-                        }
-                    };
-                    if (countEligible >= 3) { ConfirmPopup::Add("Open inventory webviews?", launchAll); } else { launchAll(); }
-                }
-                if (MenuItem("Favorites")) {
-                    int countEligible = 0;
-                    for (const AccountData* ap : selectedAccounts) if (!ap->cookie.empty()) ++countEligible;
-                    auto launchAll = [selectedAccounts]() {
-                        for (const AccountData* ap : selectedAccounts) {
-                            if (!ap->cookie.empty()) LaunchWebview("https://www.roblox.com/users/" + ap->userId + "/favorites", *ap);
-                        }
-                    };
-                    if (countEligible >= 3) { ConfirmPopup::Add("Open favorites webviews?", launchAll); } else { launchAll(); }
-                }
-                if (MenuItem("Trades")) openMany("https://www.roblox.com/trades");
-                if (MenuItem("Transactions")) openMany("https://www.roblox.com/transactions");
-                if (MenuItem("Groups")) openMany("https://www.roblox.com/communities");
-                if (MenuItem("Catalog")) openMany("https://www.roblox.com/catalog");
-                if (MenuItem("Creator Hub")) openMany("https://create.roblox.com/dashboard/creations");
-                Separator();
-                if (MenuItem("Custom URL")) {
-                    g_openMultiCustomUrlPopup = true;
-                    g_multiCustomUrlAnchorId = account.id;
-                    g_multiCustomUrlBuffer[0] = '\0';
-                }
-                ImGui::EndMenu();
-            } else {
-                auto open = [&](const string &url) {
-                    if (!account.cookie.empty()) LaunchWebview(url, account);
-                };
-                if (MenuItem("Home Page")) open("https://www.roblox.com/home");
-                if (MenuItem("Settings")) open("https://www.roblox.com/my/account");
-                if (MenuItem("Profile")) open("https://www.roblox.com/users/" + account.userId + "/profile");
-                if (MenuItem("Messages")) open("https://www.roblox.com/my/messages");
-                if (MenuItem("Friends")) open("https://www.roblox.com/users/friends");
-                if (MenuItem("Avatar")) open("https://www.roblox.com/my/avatar");
-                if (MenuItem("Inventory")) open("https://www.roblox.com/users/" + account.userId + "/inventory");
-                if (MenuItem("Favorites")) open("https://www.roblox.com/users/" + account.userId + "/favorites");
-                if (MenuItem("Trades")) open("https://www.roblox.com/trades");
-                if (MenuItem("Transactions")) open("https://www.roblox.com/transactions");
-                if (MenuItem("Groups")) open("https://www.roblox.com/communities");
-                if (MenuItem("Catalog")) open("https://www.roblox.com/catalog");
-                if (MenuItem("Creator Hub")) open("https://create.roblox.com/dashboard/creations");
-                Separator();
-                if (MenuItem("Custom URL")) {
-                    g_openCustomUrlPopup = true;
-                    g_customUrlAccountId = account.id;
-                    g_customUrlBuffer[0] = '\0';
-                }
-                ImGui::EndMenu();
-            }
-        }
-
-    // In-game section (single-account only)
-    if (!isMultiSelectionContext && account.status == "InGame") {
-            uint64_t placeId = account.placeId;
-            string jobId = account.jobId;
-            if (placeId) {
-        Separator();
-                StandardJoinMenuParams menu{};
-                menu.placeId = placeId;
-                menu.jobId = jobId;
-                menu.onLaunchGame = [pid = placeId, &account]() {
-                    vector<pair<int, string>> accounts;
-                    if (AccountFilters::IsAccountUsable(account)) accounts.emplace_back(account.id, account.cookie);
-                    if (!accounts.empty()) Threading::newThread([pid, accounts]() { launchRobloxSequential(LaunchParams::standard(pid), accounts); });
-                };
-                menu.onLaunchInstance = [pid = placeId, jid = jobId, &account]() {
-                    if (jid.empty()) return;
-                    vector<pair<int, string>> accounts;
-                    if (AccountFilters::IsAccountUsable(account)) accounts.emplace_back(account.id, account.cookie);
-                    if (!accounts.empty()) Threading::newThread([pid, jid, accounts]() { launchRobloxSequential(LaunchParams::gameJob(pid, jid), accounts); });
-                };
-                menu.onFillGame = [pid = placeId]() { FillJoinOptions(pid, ""); };
-                menu.onFillInstance = [pid = placeId, jid = jobId]() { if (!jid.empty()) FillJoinOptions(pid, jid); };
-                RenderStandardJoinMenu(menu);
-            } else {
-                Separator();
-                TextDisabled("Fetching server info...");
-            }
-        }
-        Separator();
-
-        // Set default account (single-account only)
-        if (!isMultiSelectionContext) {
-            if (MenuItem("Set as Default Account")) {
-                g_defaultAccountId = account.id;
-                g_selectedAccountIds.clear();
-                g_selectedAccountIds.insert(account.id);
-                Data::SaveSettings("settings.json");
-            }
-        }
-
-        // Removal
-        if (isMultiSelectionContext) {
-            int removeCount = static_cast<int>(g_selectedAccountIds.size());
-            PushStyleColor(ImGuiCol_Text, getStatusColor("Terminated"));
-            char label[64];
-            snprintf(label, sizeof(label), "Remove %d Accounts", removeCount);
-            if (MenuItem(label)) {
-                char buf[128];
-                snprintf(buf, sizeof(buf), "Delete %d accounts?", removeCount);
-                // Capture ids to remove
-                vector<int> ids;
-                ids.reserve(g_selectedAccountIds.size());
-                for (int idSel : g_selectedAccountIds) ids.push_back(idSel);
-                ConfirmPopup::Add(buf, [ids]() {
-                    unordered_set<int> toRemove(ids.begin(), ids.end());
-                    erase_if_local(g_accounts, [&](const AccountData &acc_data) { return toRemove.find(acc_data.id) != toRemove.end(); });
-                    for (int id : ids) g_selectedAccountIds.erase(id);
                     Status::Set("Deleted selected accounts");
                     Data::SaveAccounts();
-                });
-            }
-            PopStyleColor();
-        } else {
-            PushStyleColor(ImGuiCol_Text, getStatusColor("Terminated"));
-            if (MenuItem("Remove Account")) {
-                char buf[256];
-                snprintf(buf, sizeof(buf), "Delete %s?", account.displayName.c_str());
-                ConfirmPopup::Add(buf, [id = account.id, displayName = account.displayName]() {
-                    LOG_INFO("Attempting to delete account: " + displayName + " (ID: " + to_string(id) + ")");
-                    erase_if_local(g_accounts, [&](const AccountData &acc_data) { return acc_data.id == id; });
+                }
+            );
+        }
+        ImGui::PopStyleColor();
+    } else {
+        ImGui::PushStyleColor(ImGuiCol_Text, getStatusColor("Terminated"));
+        if (ImGui::MenuItem("Remove Account")) {
+            ConfirmPopup::Add(
+                std::format("Delete {}?", account.displayName),
+                [id = account.id, displayName = account.displayName]() {
+                    LOG_INFO(std::format("Attempting to delete account: {} (ID: {})", displayName, id));
+                    std::erase_if(g_accounts, [id](const auto& acc) { return acc.id == id; });
                     g_selectedAccountIds.erase(id);
                     Status::Set("Deleted account " + displayName);
                     Data::SaveAccounts();
-                    LOG_INFO("Successfully deleted account: " + displayName + " (ID: " + to_string(id) + ")");
-                });
-            }
-            PopStyleColor();
-        }
-        EndPopup();
-    }
-
-    if (g_openCustomUrlPopup && g_customUrlAccountId == account.id) {
-        string popupId = "Custom URL##Acct" + to_string(account.id);
-        OpenPopup(popupId.c_str());
-        g_openCustomUrlPopup = false;
-    }
-    string popupName = "Custom URL##Acct" + to_string(account.id);
-    if (BeginPopupModal(popupName.c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGuiStyle &style = GetStyle();
-        float openWidth = CalcTextSize("Open").x + style.FramePadding.x * 2.0f;
-        float cancelWidth = CalcTextSize("Cancel").x + style.FramePadding.x * 2.0f;
-        float inputWidth = GetContentRegionAvail().x - openWidth - cancelWidth - style.ItemSpacing.x;
-        if (inputWidth < 100.0f)
-            inputWidth = 100.0f;
-        PushItemWidth(inputWidth);
-        InputTextWithHint("##AcctUrl", "Enter URL", g_customUrlBuffer, sizeof(g_customUrlBuffer));
-        PopItemWidth();
-        Spacing();
-        if (Button("Open", ImVec2(openWidth, 0)) && g_customUrlBuffer[0] != '\0') {
-            LaunchWebview(g_customUrlBuffer, account);
-            g_customUrlBuffer[0] = '\0';
-            CloseCurrentPopup();
-        }
-        SameLine(0, style.ItemSpacing.x);
-        if (Button("Cancel", ImVec2(cancelWidth, 0))) {
-            g_customUrlBuffer[0] = '\0';
-            CloseCurrentPopup();
-        }
-        EndPopup();
-    }
-
-    // Multi-selection custom URL modal
-    if (g_openMultiCustomUrlPopup && g_multiCustomUrlAnchorId == account.id) {
-        OpenPopup("Custom URL##Multiple");
-        g_openMultiCustomUrlPopup = false;
-    }
-    if (BeginPopupModal("Custom URL##Multiple", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGuiStyle &style = GetStyle();
-        float openWidth = CalcTextSize("Open").x + style.FramePadding.x * 2.0f;
-        float cancelWidth = CalcTextSize("Cancel").x + style.FramePadding.x * 2.0f;
-        float inputWidth = GetContentRegionAvail().x - openWidth - cancelWidth - style.ItemSpacing.x;
-        if (inputWidth < 100.0f)
-            inputWidth = 100.0f;
-        PushItemWidth(inputWidth);
-        InputTextWithHint("##MultiUrl", "Enter URL", g_multiCustomUrlBuffer, sizeof(g_multiCustomUrlBuffer));
-        PopItemWidth();
-        Spacing();
-        if (Button("Open", ImVec2(openWidth, 0)) && g_multiCustomUrlBuffer[0] != '\0') {
-            // Open for all selected accounts that have a cookie
-            for (auto &a : g_accounts) {
-                if (g_selectedAccountIds.find(a.id) != g_selectedAccountIds.end() && !a.cookie.empty()) {
-                    LaunchWebview(g_multiCustomUrlBuffer, a);
+                    LOG_INFO(std::format("Successfully deleted account: {} (ID: {})", displayName, id));
                 }
-            }
-            g_multiCustomUrlBuffer[0] = '\0';
-            CloseCurrentPopup();
+            );
         }
-        SameLine(0, style.ItemSpacing.x);
-        if (Button("Cancel", ImVec2(cancelWidth, 0))) {
-            g_multiCustomUrlBuffer[0] = '\0';
-            CloseCurrentPopup();
-        }
-        EndPopup();
+        ImGui::PopStyleColor();
     }
+    
+    ImGui::EndPopup();
+    renderUrlPopups(account);
 }

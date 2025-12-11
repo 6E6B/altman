@@ -7,6 +7,12 @@
 #include <thread>
 #include <stdexcept>
 #include <utility>
+#include <ranges>
+#include <string_view>
+#include <format>
+#include <cctype>
+#include <array>
+#include <sstream>
 
 #include "roblox.h"
 #include "threading.h"
@@ -19,280 +25,413 @@
 #include "ui/confirm.h"
 #include "core/app_state.h"
 #include "../../utils/core/account_utils.h"
+#include "system/roblox_control.h"
 
 #ifdef _WIN32
 #include <windows.h>
 #endif
 
-#include "system/roblox_control.h"
+namespace {
+    constexpr std::string_view ICON_LAUNCH = "\xEF\x8B\xB6";
+    constexpr std::string_view ICON_CLEAR = "\xEF\x87\xB8";
+    constexpr float MIN_FIELD_WIDTH = 100.0f;  // ~100px at 16px font
+    constexpr float MIN_WIDE_WIDTH = 420.0f;   // ~420px
 
-using namespace ImGui;
-using namespace std;
+    enum JoinType {
+        Game = 0,
+        Instance = 1,
+        User = 2,
+        PrivateServer = 3
+    };
 
-static void HelpMarker(const char *desc) {
-    TextDisabled("(i)");
-    if (IsItemHovered()) {
-        BeginTooltip();
-        PushTextWrapPos(GetFontSize() * 35.0f);
-        TextUnformatted(desc);
-        PopTextWrapPos();
-        EndTooltip();
-    }
-}
+    constexpr std::array<const char*, 4> JOIN_TYPE_NAMES = {
+        "Game",
+        "Game Server",
+        "User",
+        "Private Server"
+    };
 
-static const char *join_types_local[] = {
-    "Game",
-    "Game Server",
-    "User",
-    "Private Server"
-};
+    // UUID validation parts for jobId
+    constexpr std::array<int, 5> UUID_PARTS = {8, 4, 4, 4, 12};
 
-static const char *GetJoinHintLocal(int idx) {
-    switch (idx) {
-        case 0:
-            return "placeId";
-        case 2:
-            return "username or userId (id=000)";
-        case 3:
-            return "private server link";
-        default:
+    std::string trim(std::string_view sv) {
+        const auto start = std::find_if_not(sv.begin(), sv.end(), 
+            [](char c) { return std::isspace(static_cast<unsigned char>(c)); });
+        
+        const auto end = std::find_if_not(sv.rbegin(), (std::string_view::reverse_iterator)start, 
+            [](char c) { return std::isspace(static_cast<unsigned char>(c)); }).base();
+
+        if (start >= end) {
             return "";
+        }
+        return std::string(start, end);
     }
-}
+
+    bool isHexadecimalString(std::string_view sv) noexcept {
+        return !sv.empty() && std::ranges::all_of(sv, [](char c){ return std::isxdigit(static_cast<unsigned char>(c)); });
+    }
+
+    bool isNumericString(std::string_view sv) noexcept {
+        return !sv.empty() && std::ranges::all_of(sv, [](char c){ return std::isdigit(static_cast<unsigned char>(c)); });
+    }
+
+    bool validateUUID(std::string_view uuid) {
+        if (uuid.empty()) return false;
+        
+        std::size_t pos = 0;
+        for (int part = 0; part < 5; ++part) {
+            // Check hex digits
+            for (int i = 0; i < UUID_PARTS[part]; ++i) {
+                if (pos >= uuid.size() || !std::isxdigit(static_cast<unsigned char>(uuid[pos++]))) {
+                    return false;
+                }
+            }
+            // Check hyphen separator (except after last part)
+            if (part < 4) {
+                if (pos >= uuid.size() || uuid[pos++] != '-') {
+                    return false;
+                }
+            }
+        }
+        return pos == uuid.size();
+    }
+
+    constexpr const char* getJoinHint(JoinType joinType) noexcept {
+        switch (joinType) {
+            case JoinType::Game: return "placeId (e.g., 606849621)";
+            case JoinType::User: return "username or userId (id=000)";
+            case JoinType::PrivateServer: return "private server link";
+            default: return "";
+        }
+    }
+
+    void renderHelpMarker(const char* desc) {
+        ImGui::TextDisabled("(i)");
+        if (ImGui::IsItemHovered()) {
+            ImGui::BeginTooltip();
+            ImGui::PushTextWrapPos(ImGui::GetFontSize() * 35.0f);
+            ImGui::TextUnformatted(desc);
+            ImGui::PopTextWrapPos();
+            ImGui::EndTooltip();
+        }
+    }
+
+    float calculateInputWidth() {
+        float width = ImGui::GetContentRegionAvail().x;
+        width = std::max(width, MIN_FIELD_WIDTH);
+        width = std::max(width, MIN_WIDE_WIDTH);
+        return width;
+    }
+
+    void renderErrorBorder() {
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(1.0f, 0.2f, 0.2f, 1.0f));
+    }
+
+    void endErrorBorder() {
+        ImGui::PopStyleColor();
+        ImGui::PopStyleVar();
+    }
+
+    std::vector<std::pair<int, std::string>> getUsableSelectedAccounts() {
+        std::vector<std::pair<int, std::string>> accounts;
+        accounts.reserve(g_selectedAccountIds.size());
+        
+        for (const int id : g_selectedAccountIds) {
+            const auto it = std::ranges::find_if(g_accounts, 
+                [id](const auto& a) { return a.id == id; });
+            
+            if (it != g_accounts.end() && AccountFilters::IsAccountUsable(*it)) {
+                accounts.emplace_back(it->id, it->cookie);
+            }
+        }
+        return accounts;
+    }
+
+    struct ValidationResult {
+        bool isValid{false};
+        bool showError{false};
+    };
+
+    ValidationResult validatePlaceId(std::string_view input) {
+        const auto trimmed = trim(input);
+        if (trimmed.empty()) {
+            return {false, false};
+        }
+        const bool valid = isNumericString(trimmed);
+        return {valid, !valid};
+    }
+
+    ValidationResult validateJobId(std::string_view input) {
+        const auto trimmed = trim(input);
+        if (trimmed.empty()) {
+            return {false, true};
+        }
+        const bool valid = validateUUID(trimmed);
+        return {valid, !valid};
+    }
+
+    ValidationResult validateUserInput(std::string_view input) {
+        const auto trimmed = trim(input);
+        if (trimmed.empty()) {
+            return {false, false};
+        }
+        UserSpecifier tmp{};
+        const bool valid = parseUserSpecifier(std::string(trimmed), tmp);
+        return {valid, !valid};
+    }
+
+    ValidationResult validatePrivateServerLink(std::string_view link) {
+        std::string trimmed = trim(link);  
+        if (trimmed.empty()) {
+            return {false, false};
+        }
+
+        std::string_view s = trimmed;
+
+        if (s.size() < 15 || !(s.starts_with("https://")) || s.find("roblox.com") == std::string_view::npos)
+        {
+            return {false, true};
+        }
+
+        constexpr std::string_view code_key = "code=";
+        if (auto pos = s.find(code_key); pos != std::string_view::npos)
+        {
+            std::string_view code = s.substr(pos + code_key.size());
+            if (auto amp = code.find('&'); amp != std::string_view::npos)
+                code = code.substr(0, amp);
+
+            bool valid = !code.empty() &&
+                        code.size() >= 16 &&
+                        isHexadecimalString(code);
+
+            return {valid, !valid};
+        }
+
+        constexpr std::string_view link_key = "privateServerLinkCode=";
+        if (auto pos = s.find(link_key); pos != std::string_view::npos)
+        {
+            std::string_view code = s.substr(pos + link_key.size());
+            if (auto amp = code.find('&'); amp != std::string_view::npos)
+                code = code.substr(0, amp);
+
+            bool valid = !code.empty() && isNumericString(code);
+            return {valid, !valid};
+        }
+
+        return {false, true};
+    }
 
 
-void FillJoinOptions(uint64_t placeId, const std::string &jobId) {
-    snprintf(join_value_buf, sizeof(join_value_buf), "%llu", (unsigned long long) placeId);
+    void handleJoinByUser(std::string userInput) {
+        auto accounts = getUsableSelectedAccounts();
+        if (accounts.empty()) return;
+
+        Threading::newThread([userInput = std::move(userInput), accounts = std::move(accounts)]() mutable {
+            try {
+                UserSpecifier spec{};
+                if (!parseUserSpecifier(userInput, spec)) {
+                    Status::Error("Enter username or userId (id=000)");
+                    return;
+                }
+
+                // Assumes Roblox::getUserIdFromUsername and Roblox::getPresences exist
+                const uint64_t uid = spec.isId ? spec.id : Roblox::getUserIdFromUsername(spec.username);
+                const auto presenceMap = Roblox::getPresences({uid}, accounts.front().second);
+                
+                const auto it = presenceMap.find(uid);
+                if (it == presenceMap.end() || it->second.presence != "InGame" ||
+                    it->second.placeId == 0 || it->second.jobId.empty()) {
+                    Status::Error("User is not joinable");
+                    return;
+                }
+
+                launchRobloxSequential(LaunchParams::gameJob(it->second.placeId, it->second.jobId), std::move(accounts));
+            } catch (const std::exception& e) {
+                LOG_ERROR(std::format("Join by username failed: {}", e.what()));
+                Status::Error("Failed to join by username");
+            }
+        });
+    }
+
+    void handleJoinByPrivateServer(std::string serverLink) {
+        auto accounts = getUsableSelectedAccounts();
+        if (accounts.empty()) return;
+
+        Threading::newThread([serverLink = std::move(serverLink), accounts = std::move(accounts)]() mutable {
+            try {
+                launchRobloxSequential(LaunchParams::privateServer(serverLink), std::move(accounts));
+            } catch (const std::exception& e) {
+                LOG_ERROR(std::format("Join by link failed: {}", e.what()));
+                Status::Error("Failed to join by link");
+            }
+        });
+    }
+
+    void handleJoinByPlaceId(uint64_t placeId, std::string jobId) {
+        auto accounts = getUsableSelectedAccounts();
+        if (accounts.empty()) return;
+
+        Threading::newThread([placeId, jobId = std::move(jobId), accounts = std::move(accounts)]() mutable {
+            launchRobloxSequential(LaunchParams::gameJob(placeId, jobId), std::move(accounts));
+        });
+    }
+
+    void renderInstanceInputs() {
+        const float width = calculateInputWidth();
+        
+        // Place ID input
+        ImGui::PushItemWidth(width);
+        const auto placeValidation = validatePlaceId(join_value_buf);
+        if (placeValidation.showError) renderErrorBorder();
+        ImGui::InputTextWithHint("##JoinPlaceId", "placeId", join_value_buf, IM_ARRAYSIZE(join_value_buf));
+        if (placeValidation.showError) endErrorBorder();
+        ImGui::PopItemWidth();
+
+        // Job ID input
+        ImGui::PushItemWidth(width);
+        const auto jobValidation = validateJobId(join_jobid_buf);
+        if (jobValidation.showError) renderErrorBorder();
+        ImGui::InputTextWithHint("##JoinJobId", "jobId", join_jobid_buf, IM_ARRAYSIZE(join_jobid_buf));
+        if (jobValidation.showError) endErrorBorder();
+        ImGui::PopItemWidth();
+    }
+
+    void renderSingleInput(int joinType) {
+        const float width = calculateInputWidth();
+        ImGui::PushItemWidth(width);
+
+        bool showError = false;
+        if (joinType == JoinType::User) {
+            showError = validateUserInput(join_value_buf).showError;
+        } else if (joinType == JoinType::Game) {
+            showError = validatePlaceId(join_value_buf).showError;
+        } else if (joinType == JoinType::PrivateServer) { 
+            showError = validatePrivateServerLink(join_value_buf).showError;
+        }
+
+        if (showError) renderErrorBorder();
+        ImGui::InputTextWithHint("##JoinValue", getJoinHint(static_cast<JoinType>(joinType)), 
+                                join_value_buf, IM_ARRAYSIZE(join_value_buf));
+        if (showError) endErrorBorder();
+        ImGui::PopItemWidth();
+    }
+
+    bool canJoin(int joinType) {
+        switch (joinType) {
+            case JoinType::User: {
+                const auto trimmed = trim(join_value_buf);
+                if (trimmed.empty()) return false;
+                UserSpecifier tmp{};
+                return parseUserSpecifier(trimmed, tmp);
+            }
+            case JoinType::Instance: {
+                const auto placeId = trim(join_value_buf);
+                const auto jobId = trim(join_jobid_buf);
+                return !placeId.empty() && isNumericString(placeId) && validateUUID(jobId);
+            }
+            case JoinType::Game: {
+                const auto placeId = trim(join_value_buf);
+                return !placeId.empty() && isNumericString(placeId);
+            }
+            case JoinType::PrivateServer:
+                return validatePrivateServerLink(join_value_buf).isValid;
+            default:
+                return false;
+        }
+    }
+
+    void performJoin() {
+        if (g_selectedAccountIds.empty()) {
+            ModalPopup::Add("Select an account first.");
+            return;
+        }
+
+        const auto joinType = static_cast<JoinType>(join_type_combo_index);
+
+        switch (joinType) {
+            case JoinType::User:
+                handleJoinByUser(join_value_buf);
+                break;
+                
+            case JoinType::PrivateServer:
+                handleJoinByPrivateServer(join_value_buf);
+                break;
+                
+            case JoinType::Game:
+            case JoinType::Instance: {
+                try {
+                    std::stringstream ss(join_value_buf);
+                    uint64_t placeId;
+                    if (!(ss >> placeId)) {
+                        throw std::invalid_argument("Failed to parse Place ID");
+                    }
+
+                    const std::string jobId = (joinType == JoinType::Instance) 
+                        ? join_jobid_buf : std::string();
+                        
+                    handleJoinByPlaceId(placeId, jobId);
+                } catch (const std::invalid_argument& e) {
+                    LOG_ERROR(std::format("Invalid numeric input: {}", e.what()));
+                } catch (const std::out_of_range& e) {
+                    LOG_ERROR(std::format("Numeric input out of range: {}", e.what()));
+                }
+                break;
+            }
+            default:
+                LOG_ERROR("Unsupported join type");
+                break;
+        }
+    }
+
+} 
+
+void FillJoinOptions(uint64_t placeId, const std::string& jobId) {
+    std::snprintf(join_value_buf, sizeof(join_value_buf), "%llu", 
+                  static_cast<unsigned long long>(placeId));
+    
     if (jobId.empty()) {
         join_jobid_buf[0] = '\0';
-        join_type_combo_index = 0;
+        join_type_combo_index = JoinType::Game;
     } else {
-        snprintf(join_jobid_buf, sizeof(join_jobid_buf), "%s", jobId.c_str());
-        join_type_combo_index = 1;
+        std::snprintf(join_jobid_buf, sizeof(join_jobid_buf), "%s", jobId.c_str());
+        join_type_combo_index = JoinType::Instance;
     }
     g_activeTab = Tab_Accounts;
 }
 
 void RenderJoinOptions() {
-    Spacing();
-    Text("Join Options");
-    SameLine();
-    HelpMarker(
+    ImGui::Spacing();
+    ImGui::Text("Join Options");
+    ImGui::SameLine();
+    renderHelpMarker(
         "Join Options:\n"
         "- Game: joins a game with its placeId\n"
         "- Instance: joins the instance of a game with its placeId & jobId\n"
         "- User: joins the instance a user is in with their username or userId (formatted as id=000)\n"
         "\t- User option is NOT a sniper, it only works for users who have joins on!"
     );
-    Spacing();
-    Combo(" Join Type", &join_type_combo_index, join_types_local, IM_ARRAYSIZE(join_types_local));
+    ImGui::Spacing();
 
-    if (join_type_combo_index == 1) {
-        float w = GetContentRegionAvail().x;
-        float minField = GetFontSize() * 6.25f; // ~100px
-        float minWide = GetFontSize() * 26.25f; // ~420px
-        if (w < minField)
-            w = minField;
-        if (w < minWide) w = minWide;
-        PushItemWidth(w);
+    ImGui::Combo(" Join Type", &join_type_combo_index, 
+                JOIN_TYPE_NAMES.data(), static_cast<int>(JOIN_TYPE_NAMES.size()));
 
-        bool placeErr = false;
-        {
-            std::string s = join_value_buf;
-            auto l = s.find_first_not_of(" \t\n\r"); auto r = s.find_last_not_of(" \t\n\r");
-            if (l == std::string::npos) s.clear(); else s = s.substr(l, r - l + 1);
-            if (!s.empty()) {
-                for (char c : s) { if (c < '0' || c > '9') { placeErr = true; break; } }
-            }
-        }
-        if (placeErr) { PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f); PushStyleColor(ImGuiCol_Border, ImVec4(1.0f, 0.2f, 0.2f, 1.0f)); }
-        InputTextWithHint("##JoinPlaceId", "placeId", join_value_buf, IM_ARRAYSIZE(join_value_buf));
-        if (placeErr) { PopStyleColor(); PopStyleVar(); }
-        PopItemWidth();
-        PushItemWidth(w);
-        bool jobErr = false;
-        {
-            std::string s = join_jobid_buf;
-            auto l = s.find_first_not_of(" \t\n\r"); auto r = s.find_last_not_of(" \t\n\r");
-            if (l == std::string::npos) s.clear(); else s = s.substr(l, r - l + 1);
-            if (!s.empty()) {
-                auto isHex = [](char c){ return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); };
-                const int parts[5] = {8,4,4,4,12}; int idx = 0; size_t pos = 0;
-                for (int p = 0; p < 5; ++p) {
-                    for (int k = 0; k < parts[p]; ++k) { if (pos >= s.size() || !isHex(s[pos++])) { jobErr = true; break; } }
-                    if (jobErr) break; if (p < 4) { if (pos >= s.size() || s[pos++] != '-') { jobErr = true; break; } }
-                }
-                if (!jobErr && pos != s.size()) jobErr = true;
-            }
-        }
-        if (jobErr) { PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f); PushStyleColor(ImGuiCol_Border, ImVec4(1.0f, 0.2f, 0.2f, 1.0f)); }
-        InputTextWithHint("##JoinJobId", "jobId", join_jobid_buf, IM_ARRAYSIZE(join_jobid_buf));
-        if (jobErr) { PopStyleColor(); PopStyleVar(); }
-        PopItemWidth();
+    // Render appropriate inputs based on join type
+    if (join_type_combo_index == JoinType::Instance) {
+        renderInstanceInputs();
     } else {
-        float w = GetContentRegionAvail().x;
-        float minField = GetFontSize() * 6.25f; // ~100px
-        float minWide = GetFontSize() * 26.25f; // ~420px
-        if (w < minField)
-            w = minField;
-        if (w < minWide) w = minWide;
-        PushItemWidth(w);
-        bool showError = false;
-        if (join_type_combo_index == 2) {
-            std::string preview = join_value_buf;
-            UserSpecifier tmp{}; 
-            std::string trimmed = preview;
-            auto l = trimmed.find_first_not_of(" \t\n\r");
-            auto r = trimmed.find_last_not_of(" \t\n\r");
-            if (l == std::string::npos) trimmed.clear(); else trimmed = trimmed.substr(l, r - l + 1);
-            if (!trimmed.empty() && !parseUserSpecifier(trimmed, tmp)) showError = true;
-        } else if (join_type_combo_index == 0) {
-            std::string s = join_value_buf; auto l = s.find_first_not_of(" \t\n\r"); auto r = s.find_last_not_of(" \t\n\r");
-            if (l == std::string::npos) s.clear(); else s = s.substr(l, r - l + 1);
-            if (!s.empty()) {
-                for (char c : s) { if (c < '0' || c > '9') { showError = true; break; } }
-            }
-        }
-        if (showError) { PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f); PushStyleColor(ImGuiCol_Border, ImVec4(1.0f, 0.2f, 0.2f, 1.0f)); }
-        InputTextWithHint("##JoinValue",
-                          GetJoinHintLocal(join_type_combo_index),
-                          join_value_buf,
-                          IM_ARRAYSIZE(join_value_buf));
-        if (showError) { PopStyleColor(); PopStyleVar(); }
-        PopItemWidth();
+        renderSingleInput(join_type_combo_index);
     }
 
-    Separator();
-    bool allowJoin = true;
-    if (join_type_combo_index == 2) {
-        std::string s = join_value_buf;
-        auto l = s.find_first_not_of(" \t\n\r");
-        auto r = s.find_last_not_of(" \t\n\r");
-        if (l == std::string::npos) s.clear(); else s = s.substr(l, r - l + 1);
-        UserSpecifier tmp{}; 
-        if (s.empty() || !parseUserSpecifier(s, tmp)) allowJoin = false;
-    } else if (join_type_combo_index == 1) {
-        std::string pid = join_value_buf; std::string jid = join_jobid_buf;
-        auto trim = [](std::string &x){ auto l=x.find_first_not_of(" \t\n\r"); auto r=x.find_last_not_of(" \t\n\r"); if(l==std::string::npos) x.clear(); else x=x.substr(l,r-l+1); };
-        trim(pid); trim(jid);
-        if (pid.empty() || !std::all_of(pid.begin(), pid.end(), [](char c){ return c>='0' && c<='9'; })) allowJoin = false;
-        auto isHex = [](char c){ return (c>='0'&&c<='9')||(c>='a'&&c<='f')||(c>='A'&&c<='F'); };
-        if (!jid.empty()) {
-            const int parts[5] = {8,4,4,4,12}; size_t pos=0; bool err=false;
-            for(int p=0;p<5;++p){ for(int k=0;k<parts[p];++k){ if(pos>=jid.size()||!isHex(jid[pos++])){err=true;break;} } if(err)break; if(p<4){ if(pos>=jid.size()||jid[pos++]!='-'){err=true;break;} } }
-            if (err || pos!=jid.size()) allowJoin = false;
-        } else { allowJoin = false; }
-    } else if (join_type_combo_index == 0) {
-        std::string pid = join_value_buf; auto l=pid.find_first_not_of(" \t\n\r"); auto r=pid.find_last_not_of(" \t\n\r"); if(l==std::string::npos) pid.clear(); else pid=pid.substr(l,r-l+1);
-        if (pid.empty() || !std::all_of(pid.begin(), pid.end(), [](char c){ return c>='0' && c<='9'; })) allowJoin = false;
-    }
-    BeginDisabled(!allowJoin);
-    if (Button(" \xEF\x8B\xB6  Launch ")) {
-        auto doJoin = [&]() {
-            if (g_selectedAccountIds.empty()) {
-                ModalPopup::Add("Select an account first.");
-                return;
-            }
+    ImGui::Separator();
 
-            if (join_type_combo_index == 2) {
-                string userInput = join_value_buf;
-                vector<pair<int, string> > accounts;
-                for (int id: g_selectedAccountIds) {
-                    auto it = std::find_if(g_accounts.begin(), g_accounts.end(),
-                                           [id](auto &a) { return a.id == id; });
-                    if (it != g_accounts.end() && AccountFilters::IsAccountUsable(*it))
-                        accounts.emplace_back(it->id, it->cookie);
-                }
-                if (accounts.empty())
-                    return;
-
-                Threading::newThread([userInput, accounts]() {
-                    try {
-                        UserSpecifier spec{};
-                        if (!parseUserSpecifier(userInput, spec)) {
-                            Status::Error("Enter username or userId (id=000)");
-                            return;
-                        }
-                        uint64_t uid = 0;
-                        if (spec.isId) {
-                            uid = spec.id;
-                        } else {
-                            uid = Roblox::getUserIdFromUsername(spec.username);
-                        }
-                        auto pres = Roblox::getPresences({uid}, accounts.front().second);
-                        auto it = pres.find(uid);
-                        if (it == pres.end() || it->second.presence != "InGame" ||
-                            it->second.placeId == 0 || it->second.jobId.empty()) {
-                            Status::Error("User is not joinable");
-                            return;
-                        }
-
-                        launchRobloxSequential(LaunchParams::gameJob(it->second.placeId, it->second.jobId), accounts);
-                        // does not work properly yet. It says "The Following user has left the experience." If they aren't your friend
-                        //launchRobloxSequential(LaunchParams::followUser(std::to_string(uid)), accounts);
-                    } catch (const std::exception &e) {
-                        LOG_ERROR(std::string("Join by username failed: ") + e.what());
-                        Status::Error("Failed to join by username");
-                    }
-                });
-                return;
-            }
-
-            if (join_type_combo_index == 3) {
-                string userInput = join_value_buf;
-                vector<pair<int, string> > accounts;
-                for (int id: g_selectedAccountIds) {
-                    auto it = std::find_if(g_accounts.begin(), g_accounts.end(),
-                                           [id](auto &a) { return a.id == id; });
-                    if (it != g_accounts.end() && AccountFilters::IsAccountUsable(*it))
-                        accounts.emplace_back(it->id, it->cookie);
-                }
-                if (accounts.empty())
-                    return;
-
-                Threading::newThread([userInput, accounts]() {
-                    try {
-                        launchRobloxSequential(LaunchParams::privateServer(userInput), accounts);
-                    } catch (const std::exception &e) {
-                        LOG_ERROR(std::string("Join by link: ") + e.what());
-                        Status::Error("Failed to join by link");
-                    }
-                });
-                return;
-            }
-
-            uint64_t placeId_val = 0;
-            std::string jobId_str;
-
-            try {
-                placeId_val = std::stoull(join_value_buf);
-
-                if (join_type_combo_index == 1) {
-                    jobId_str = join_jobid_buf;
-                } else if (join_type_combo_index != 0) {
-            LOG_ERROR("Error: Join type not supported for direct launch");
-                    return;
-                }
-            } catch (const std::invalid_argument &ia) {
-                LOG_ERROR("Invalid numeric input for join: " + std::string(ia.what()));
-                return;
-            } catch (const std::out_of_range &oor) {
-                LOG_ERROR("Numeric input out of range for join: " + std::string(oor.what()));
-                return;
-            }
-
-            std::vector<std::pair<int, std::string> > accounts;
-            for (int id: g_selectedAccountIds) {
-                auto it = std::find_if(g_accounts.begin(), g_accounts.end(),
-                                       [id](auto &a) { return a.id == id; });
-                if (it != g_accounts.end() && AccountFilters::IsAccountUsable(*it))
-                    accounts.emplace_back(it->id, it->cookie);
-            }
-
-            Threading::newThread([placeId_val, jobId_str, accounts]() {
-                launchRobloxSequential(LaunchParams::gameJob(placeId_val, jobId_str), accounts);
-            });
-        };
+    // Launch button
+    const bool allowJoin = canJoin(join_type_combo_index);
+    ImGui::BeginDisabled(!allowJoin);
+    
+    if (ImGui::Button(std::format(" {}  Launch ", ICON_LAUNCH).c_str())) {
+        auto doJoin = [&]() { performJoin(); };
+        
 #ifdef _WIN32
         if (!g_multiRobloxEnabled && RobloxControl::IsRobloxRunning()) {
             ConfirmPopup::Add("Roblox is already running. Launch anyway?", doJoin);
@@ -300,15 +439,16 @@ void RenderJoinOptions() {
             doJoin();
         }
 #else
-    doJoin();
+        doJoin();
 #endif
     }
-    EndDisabled();
+    ImGui::EndDisabled();
 
-    SameLine(0, 10);
-    if (Button(" \xEF\x87\xB8  Clear Join Options ")) {
+    // Clear button
+    ImGui::SameLine(0, 10);
+    if (ImGui::Button(std::format(" {}  Clear Join Options ", ICON_CLEAR).c_str())) {
         join_value_buf[0] = '\0';
         join_jobid_buf[0] = '\0';
-        join_type_combo_index = 0;
+        join_type_combo_index = JoinType::Game;
     }
 }

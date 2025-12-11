@@ -11,6 +11,8 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <ctime>
+#include <ranges>
+#include <format>
 
 #include "main_thread.h"
 #include "webview.hpp"
@@ -26,350 +28,403 @@
 #include "../../ui.h"
 #include "../data.h"
 
-using namespace ImGui;
-using namespace std;
+namespace {
+    constexpr int COLUMN_COUNT = 6;
+    constexpr float HOLD_THRESHOLD_SECONDS = 0.65f;
+    constexpr float DEFAULT_ROW_HEIGHT = 19.0f;
+    constexpr float MIN_INPUT_WIDTH = 100.0f;
 
-static bool s_openUrlPopup = false;
-static int s_urlPopupAccountId = -1;
-static char s_urlBuffer[256] = "";
-static std::unordered_set<int> s_voiceUpdateInProgress;
+    constexpr float COL_DISPLAY_NAME_WEIGHT = 1.0000f;
+    constexpr float COL_USERNAME_WEIGHT = 1.0000f;
+    constexpr float COL_USERID_WEIGHT = 0.7000f;
+    constexpr float COL_STATUS_WEIGHT = 0.5000f;
+    constexpr float COL_VOICE_WEIGHT = 0.4500f;
+    constexpr float COL_NOTE_WEIGHT = 2.0000f;
 
-void RenderAccountsTable(vector<AccountData> &accounts_to_display, const char *table_id, float table_height)
-{
-	constexpr int column_count = 6;
-	ImGuiTableFlags table_flags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable |
-								  ImGuiTableFlags_ScrollY | ImGuiTableFlags_Hideable | ImGuiTableFlags_Reorderable |
-								  ImGuiTableFlags_ContextMenuInBody;
+    // Voice status colors (pastel palette)
+    constexpr ImVec4 COLOR_VOICE_ENABLED{0.7f, 1.0f, 0.7f, 1.0f};   // Pastel green
+    constexpr ImVec4 COLOR_VOICE_DISABLED{1.0f, 1.0f, 0.7f, 1.0f};  // Pastel yellow
+    constexpr ImVec4 COLOR_VOICE_BANNED{1.0f, 0.7f, 0.7f, 1.0f};    // Pastel red
+    constexpr ImVec4 COLOR_VOICE_NA{0.7f, 0.7f, 0.7f, 1.0f};        // Gray
 
-	if (g_selectedAccountIds.empty() && g_defaultAccountId != -1)
-	{
-		g_selectedAccountIds.insert(g_defaultAccountId);
-	}
+    struct UrlPopupState {
+        bool open{false};
+        int accountId{-1};
+        char buffer[256]{};
+    };
 
-	if (BeginTable(table_id, column_count, table_flags, ImVec2(0.0f, table_height > 0 ? table_height - 2.0f : 0.0f)))
-	{
-		TableSetupColumn("Display Name", ImGuiTableColumnFlags_WidthStretch, 1.0000f);
-		TableSetupColumn("Username", ImGuiTableColumnFlags_WidthStretch, 1.0000f);
-		TableSetupColumn("UserID", ImGuiTableColumnFlags_WidthStretch, 0.7000f);
-		TableSetupColumn("Status", ImGuiTableColumnFlags_WidthStretch, 0.5000f);
-		TableSetupColumn("Voice", ImGuiTableColumnFlags_WidthStretch, 0.4500f);
-		TableSetupColumn("Note", ImGuiTableColumnFlags_WidthStretch, 2.0000f);
-		TableSetupScrollFreeze(0, 1);
+    UrlPopupState g_urlPopup;
+    std::unordered_set<int> g_voiceUpdateInProgress;
+    std::unordered_map<int, double> g_holdStartTimes;
 
-		TableNextRow(ImGuiTableRowFlags_Headers);
-		TableNextColumn();
-		TextUnformatted("Display Name");
-		TableNextColumn();
-		TextUnformatted("Username");
-		TableNextColumn();
-		TextUnformatted("UserID");
-		TableNextColumn();
-		TextUnformatted("Status");
-		TableNextColumn();
-		TextUnformatted("Voice");
-		TableNextColumn();
-		TextUnformatted("Note");
+    ImVec4 getVoiceStatusColor(std::string_view status) noexcept {
+        if (status == "Enabled") return COLOR_VOICE_ENABLED;
+        if (status == "Disabled") return COLOR_VOICE_DISABLED;
+        if (status == "Banned") return COLOR_VOICE_BANNED;
+        if (status == "N/A") return COLOR_VOICE_NA;
+        return ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+    }
 
-		for (auto &account : accounts_to_display)
-		{
-			TableNextRow();
-			PushID(account.id);
+    void handleAccountSelection(int accountId, bool isCurrentlySelected) {
+        if (ImGui::GetIO().KeyCtrl) {
+            if (isCurrentlySelected) {
+                g_selectedAccountIds.erase(accountId);
+            } else {
+                g_selectedAccountIds.insert(accountId);
+            }
+        } else {
+            const bool wasSolelySelected = isCurrentlySelected && g_selectedAccountIds.size() == 1;
+            g_selectedAccountIds.clear();
+            if (!wasSolelySelected) {
+                g_selectedAccountIds.insert(accountId);
+            }
+        }
+    }
 
-			bool is_row_selected = g_selectedAccountIds.contains(account.id);
+    void handleDoubleClick(const AccountData& account) {
+        if (account.cookie.empty()) {
+            LOG_WARN("Cannot open browser - cookie is empty for account: " + account.displayName);
+            Status::Error("Cookie is empty for this account");
+            return;
+        }
 
-			if (is_row_selected)
-			{
-				TableSetBgColor(ImGuiTableBgTarget_RowBg0, GetColorU32(ImGuiCol_Header));
-			}
+        LOG_INFO(std::format("Opening browser for account: {} (ID: {})", 
+                            account.displayName, account.id));
+        Threading::newThread([account]() { 
+            LaunchBrowserWithCookie(account); 
+        });
+    }
 
-			float row_interaction_height = GetFrameHeight();
-			if (row_interaction_height <= 0)
-				row_interaction_height = GetTextLineHeightWithSpacing();
-			if (row_interaction_height <= 0)
-				row_interaction_height = 19.0f;
+    void handleHoldAction(const AccountData& account) {
+        if (account.cookie.empty()) {
+            LOG_WARN("Cannot open browser - cookie is empty for account: " + account.displayName);
+            Status::Error("Cookie is empty for this account");
+            return;
+        }
 
-			float text_visual_height = GetTextLineHeight();
-			float vertical_padding = (row_interaction_height - text_visual_height) * 0.5f;
-			vertical_padding = ImMax(0.0f, vertical_padding);
+        g_urlPopup.open = true;
+        g_urlPopup.accountId = account.id;
+        g_urlPopup.buffer[0] = '\0';
+    }
 
-			TableNextColumn();
-			float cell_content_start_y = GetCursorPosY();
+    void checkVoiceBanExpiry(AccountData& account) {
+        if (account.voiceStatus != "Banned" || account.voiceBanExpiry <= 0) return;
+        if (account.cookie.empty()) return;
+        if (g_voiceUpdateInProgress.contains(account.id)) return;
 
-			char selectable_label[64];
-			snprintf(selectable_label, sizeof(selectable_label), "##row_selectable_%d", account.id);
+        const auto now = std::time(nullptr);
+        if (now < account.voiceBanExpiry) return;
 
-			bool banned = account.status == "Banned" || account.status == "Warned" || account.status == "Terminated";
-			if (Selectable(
-					selectable_label,
-					is_row_selected,
-					ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap,
-					ImVec2(0, row_interaction_height)))
-			{
-				if (GetIO().KeyCtrl)
-				{
-					if (is_row_selected)
-						g_selectedAccountIds.erase(account.id);
-					else
-						g_selectedAccountIds.insert(account.id);
-				}
-				else
-				{
-					bool was_already_solely_selected = (is_row_selected && g_selectedAccountIds.size() == 1);
-					g_selectedAccountIds.clear();
-					if (!was_already_solely_selected)
-						g_selectedAccountIds.insert(account.id);
-				}
-			}
+        g_voiceUpdateInProgress.insert(account.id);
+        const int accountId = account.id;
+        const std::string cookie = account.cookie;
 
-			static std::unordered_map<int, double> holdStartTimes;
-			if (IsItemActivated() && IsMouseDown(ImGuiMouseButton_Left))
-			{
-				holdStartTimes[account.id] = GetTime();
-			}
+        Threading::newThread([accountId, cookie]() {
+            const auto voiceStatus = Roblox::getVoiceChatStatus(cookie);
+            MainThread::Post([accountId, voiceStatus]() {
+                const auto it = std::ranges::find_if(g_accounts, 
+                    [accountId](const auto& a) { return a.id == accountId; });
+                
+                if (it != g_accounts.end()) {
+                    it->voiceStatus = voiceStatus.status;
+                    it->voiceBanExpiry = voiceStatus.bannedUntil;
+                }
+                g_voiceUpdateInProgress.erase(accountId);
+                Data::SaveAccounts();
+            });
+        });
+    }
 
-			bool holdTriggered = false;
-			if (IsItemActive())
-			{
-				auto it = holdStartTimes.find(account.id);
-				if (it != holdStartTimes.end() && (GetTime() - it->second) >= 0.65f)
-				{
-					holdStartTimes.erase(it);
-					holdTriggered = true;
-				}
-			}
-			else
-			{
-				holdStartTimes.erase(account.id);
-			}
+    struct RowMetrics {
+        float height;
+        float verticalPadding;
+    };
 
-			if (IsItemHovered() && IsMouseDoubleClicked(ImGuiMouseButton_Left))
-			{
-				if (!account.cookie.empty())
-				{
-					LOG_INFO(
-						"Opening browser for account: " + account.displayName + " (ID: " + std::to_string(account.id) +
-						")");
-					Threading::newThread([acc = account]()
-										 { LaunchBrowserWithCookie(acc); });
-				}
-				else
-				{
-					LOG_WARN("Cannot open browser - cookie is empty for account: " + account.displayName);
-					Status::Error("Cookie is empty for this account");
-				}
-			}
+    RowMetrics calculateRowMetrics() {
+        float height = ImGui::GetFrameHeight();
+        if (height <= 0.0f) height = ImGui::GetTextLineHeightWithSpacing();
+        if (height <= 0.0f) height = DEFAULT_ROW_HEIGHT;
 
-			if (holdTriggered)
-			{
-				if (!account.cookie.empty())
-				{
-					s_openUrlPopup = true;
-					s_urlPopupAccountId = account.id;
-					s_urlBuffer[0] = '\0';
-				}
-				else
-				{
-					LOG_WARN("Cannot open browser - cookie is empty for account: " + account.displayName);
-					Status::Error("Cookie is empty for this account");
-				}
-			}
+        const float textHeight = ImGui::GetTextLineHeight();
+        const float padding = std::max(0.0f, (height - textHeight) * 0.5f);
 
-			string context_menu_id = string(table_id) + "_ContextMenu_" + to_string(account.id);
+        return {height, padding};
+    }
 
-			RenderAccountContextMenu(account, context_menu_id);
+    void renderCenteredTextCell(std::string_view text, float cellStartY, 
+                                float rowHeight, float verticalPadding, 
+                                const ImVec4* color = nullptr) {
+        ImGui::TableNextColumn();
+        const float currentY = ImGui::GetCursorPosY();
 
-			SetNextItemAllowOverlap();
+        ImGui::SetCursorPosY(currentY + verticalPadding);
+        if (color) {
+            ImGui::TextColored(*color, "%s", text.data());
+        } else {
+            ImGui::TextUnformatted(text.data());
+        }
 
-			SetCursorPosY(cell_content_start_y + vertical_padding);
-			TextUnformatted(account.displayName.c_str());
+        ImGui::SetCursorPosY(currentY + rowHeight);
+    }
 
-			SetCursorPosY(cell_content_start_y + row_interaction_height);
+    void renderStatusCell(const AccountData& account, float startY, 
+                         float rowHeight, float verticalPadding) {
+        ImGui::TableNextColumn();
+        const float currentY = ImGui::GetCursorPosY();
 
-			auto render_centered_text_in_cell = [&](const char *text, ImVec4 *color = nullptr)
-			{
-				TableNextColumn();
-				float current_cell_start_y = GetCursorPosY();
+        ImGui::SetCursorPosY(currentY + verticalPadding);
+        const ImVec4 statusColor = getStatusColor(account.status);
+        ImGui::TextColored(statusColor, "%s", account.status.c_str());
 
-				SetCursorPosY(current_cell_start_y + vertical_padding);
-				if (color)
-					TextColored(*color, "%s", text);
-				else
-					TextUnformatted(text);
+        if (ImGui::IsItemHovered()) {
+            ImGui::BeginTooltip();
+            if (account.status == "Banned" && account.banExpiry > 0) {
+                const auto timeStr = formatCountdown(account.banExpiry);
+                ImGui::TextUnformatted(timeStr.c_str());
+            } else if (account.status == "InGame" && !account.lastLocation.empty()) {
+                ImGui::TextUnformatted(account.lastLocation.c_str());
+            }
+            ImGui::EndTooltip();
+        }
 
-				SetCursorPosY(current_cell_start_y + row_interaction_height);
-			};
+        ImGui::SetCursorPosY(currentY + rowHeight);
+    }
 
-			render_centered_text_in_cell(account.username.c_str());
-			render_centered_text_in_cell(account.userId.c_str());
+    void renderVoiceCell(AccountData& account, float startY, 
+                        float rowHeight, float verticalPadding) {
+        ImGui::TableNextColumn();
+        const float currentY = ImGui::GetCursorPosY();
 
-			ImVec4 statusColor = getStatusColor(account.status);
-			TableNextColumn();
-			float status_y = GetCursorPosY();
-			SetCursorPosY(status_y + vertical_padding);
-			TextColored(statusColor, "%s", account.status.c_str());
-			if (IsItemHovered())
-			{
-				if (account.status == "Banned" && account.banExpiry > 0)
-				{
-					BeginTooltip();
-					string timeStr = formatCountdown(account.banExpiry);
-					TextUnformatted(timeStr.c_str());
-					EndTooltip();
-				}
-				else if (account.status == "InGame" && !account.lastLocation.empty())
-				{
-					BeginTooltip();
-					TextUnformatted(account.lastLocation.c_str());
-					EndTooltip();
-				}
-			}
-			SetCursorPosY(status_y + row_interaction_height);
+        checkVoiceBanExpiry(account);
 
-			TableNextColumn();
-			float voice_y = GetCursorPosY();
-			SetCursorPosY(voice_y + vertical_padding);
-			ImVec4 voiceCol = ImVec4(1.f, 1.f, 1.f, 1.f);
-			if (account.voiceStatus == "Enabled")
-				voiceCol = ImVec4(0.7f, 1.f, 0.7f, 1.f); // Pastel green
-			else if (account.voiceStatus == "Disabled")
-				voiceCol = ImVec4(1.f, 1.f, 0.7f, 1.f); // Pastel yellow
-			else if (account.voiceStatus == "Banned")
-				voiceCol = ImVec4(1.f, 0.7f, 0.7f, 1.f); // Pastel red
-			else if (account.voiceStatus == "N/A")
-				voiceCol = ImVec4(0.7f, 0.7f, 0.7f, 1.f); // Darker gray for N/A
+        ImGui::SetCursorPosY(currentY + verticalPadding);
+        const ImVec4 voiceColor = getVoiceStatusColor(account.voiceStatus);
+        ImGui::TextColored(voiceColor, "%s", account.voiceStatus.c_str());
 
-			if (account.voiceStatus == "Banned" && account.voiceBanExpiry > 0)
-			{
-				time_t now = time(nullptr);
-				if (now >= account.voiceBanExpiry &&
-					!account.cookie.empty() &&
-					s_voiceUpdateInProgress.count(account.id) == 0)
-				{
-					s_voiceUpdateInProgress.insert(account.id);
-					int accId = account.id;
-					string cookie = account.cookie;
-					Threading::newThread([accId, cookie]()
-										 {
-						auto vs = Roblox::getVoiceChatStatus(cookie);
-						MainThread::Post([accId, vs]() {
-							auto it = find_if(g_accounts.begin(), g_accounts.end(),
-							                  [&](const AccountData &a) { return a.id == accId; });
-							if (it != g_accounts.end()) {
-								it->voiceStatus = vs.status;
-								it->voiceBanExpiry = vs.bannedUntil;
-							}
-							s_voiceUpdateInProgress.erase(accId);
-							Data::SaveAccounts();
-						}); });
-				}
-			}
+        if (ImGui::IsItemHovered()) {
+            ImGui::BeginTooltip();
+            if (account.voiceStatus == "Banned" && account.voiceBanExpiry > 0) {
+                const auto timeStr = formatCountdown(account.voiceBanExpiry);
+                ImGui::TextUnformatted(timeStr.c_str());
+            } else if (account.voiceStatus == "Unknown") {
+                ImGui::TextUnformatted("HTTP request returned an error");
+            } else if (account.voiceStatus == "N/A") {
+                ImGui::TextUnformatted("HTTP request unavailable");
+            }
+            ImGui::EndTooltip();
+        }
 
-			TextColored(voiceCol, "%s", account.voiceStatus.c_str());
-			if (IsItemHovered())
-			{
-				if (account.voiceStatus == "Banned" && account.voiceBanExpiry > 0)
-				{
-					BeginTooltip();
-					string timeStr = formatCountdown(account.voiceBanExpiry);
-					TextUnformatted(timeStr.c_str());
-					EndTooltip();
-				}
-				else if (account.voiceStatus == "Unknown")
-				{
-					BeginTooltip();
-					TextUnformatted("HTTP request returned an error");
-					EndTooltip();
-				}
-				else if (account.voiceStatus == "N/A")
-				{
-					BeginTooltip();
-					TextUnformatted("HTTP request unavailable");
-					EndTooltip();
-				}
-			}
-			SetCursorPosY(voice_y + row_interaction_height);
+        ImGui::SetCursorPosY(currentY + rowHeight);
+    }
 
-			render_centered_text_in_cell(account.note.c_str());
+    void renderAccountRow(AccountData& account, const RowMetrics& metrics) {
+        ImGui::TableNextRow();
+        ImGui::PushID(account.id);
 
-			PopID();
-		}
-		EndTable();
-	}
+        const bool isSelected = g_selectedAccountIds.contains(account.id);
+        if (isSelected) {
+            ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, 
+                                  ImGui::GetColorU32(ImGuiCol_Header));
+        }
 
-	if (s_openUrlPopup)
-	{
-		OpenPopup("Open URL");
-		s_openUrlPopup = false;
-	}
-	if (BeginPopupModal("Open URL", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
-	{
-		ImGuiStyle &style = GetStyle();
-		float openWidth = CalcTextSize("Open").x + style.FramePadding.x * 2.0f;
-		float cancelWidth = CalcTextSize("Cancel").x + style.FramePadding.x * 2.0f;
-		float inputWidth = GetContentRegionAvail().x - openWidth - cancelWidth - style.ItemSpacing.x;
-		float minField = GetFontSize() * 6.25f; // ~100px at 16px
-		if (inputWidth < minField)
-			inputWidth = minField;
-		PushItemWidth(inputWidth);
-		InputTextWithHint("##WebviewUrl", "Enter URL", s_urlBuffer, sizeof(s_urlBuffer));
-		PopItemWidth();
-		Spacing();
-		if (Button("Open", ImVec2(openWidth, 0)) && s_urlBuffer[0] != '\0')
-		{
-			auto it = find_if(g_accounts.begin(), g_accounts.end(), [&](const AccountData &a)
-							  { return a.id == s_urlPopupAccountId; });
-			if (it != g_accounts.end())
-			{
-				string url = s_urlBuffer;
-				Threading::newThread([acc = *it, url]() { LaunchWebview(url, acc); });
-			}
-			s_urlBuffer[0] = '\0';
-			CloseCurrentPopup();
-		}
-		SameLine(0, style.ItemSpacing.x);
-		if (Button("Cancel", ImVec2(cancelWidth, 0)))
-		{
-			s_urlBuffer[0] = '\0';
-			CloseCurrentPopup();
-		}
-		EndPopup();
-	}
+        // First column: Display Name with selectable
+        ImGui::TableNextColumn();
+        const float cellStartY = ImGui::GetCursorPosY();
+
+        const auto selectableLabel = std::format("##row_selectable_{}", account.id);
+        if (ImGui::Selectable(selectableLabel.c_str(), isSelected,
+                             ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap,
+                             ImVec2(0, metrics.height))) {
+            handleAccountSelection(account.id, isSelected);
+        }
+
+        // Handle hold gesture
+        if (ImGui::IsItemActivated() && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+            g_holdStartTimes[account.id] = ImGui::GetTime();
+        }
+
+        bool holdTriggered = false;
+        if (ImGui::IsItemActive()) {
+            if (const auto it = g_holdStartTimes.find(account.id); 
+                it != g_holdStartTimes.end() && 
+                (ImGui::GetTime() - it->second) >= HOLD_THRESHOLD_SECONDS) {
+                g_holdStartTimes.erase(it);
+                holdTriggered = true;
+            }
+        } else {
+            g_holdStartTimes.erase(account.id);
+        }
+
+        // Handle double-click
+        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+            handleDoubleClick(account);
+        }
+
+        if (holdTriggered) {
+            handleHoldAction(account);
+        }
+
+        // Context menu
+        const auto contextMenuId = std::format("AccountsTable_ContextMenu_{}", account.id);
+        RenderAccountContextMenu(account, contextMenuId);
+
+        // Display name text
+        ImGui::SetNextItemAllowOverlap();
+        ImGui::SetCursorPosY(cellStartY + metrics.verticalPadding);
+        ImGui::TextUnformatted(account.displayName.c_str());
+        ImGui::SetCursorPosY(cellStartY + metrics.height);
+
+        // Remaining columns
+        renderCenteredTextCell(account.username, cellStartY, metrics.height, metrics.verticalPadding);
+        renderCenteredTextCell(account.userId, cellStartY, metrics.height, metrics.verticalPadding);
+        renderStatusCell(account, cellStartY, metrics.height, metrics.verticalPadding);
+        renderVoiceCell(account, cellStartY, metrics.height, metrics.verticalPadding);
+        renderCenteredTextCell(account.note, cellStartY, metrics.height, metrics.verticalPadding);
+
+        ImGui::PopID();
+    }
+
+    void renderUrlPopup() {
+        if (g_urlPopup.open) {
+            ImGui::OpenPopup("Open URL");
+            g_urlPopup.open = false;
+        }
+
+        if (!ImGui::BeginPopupModal("Open URL", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            return;
+        }
+
+        const auto& style = ImGui::GetStyle();
+        const float openWidth = ImGui::CalcTextSize("Open").x + style.FramePadding.x * 2.0f;
+        const float cancelWidth = ImGui::CalcTextSize("Cancel").x + style.FramePadding.x * 2.0f;
+        const float inputWidth = std::max(MIN_INPUT_WIDTH, 
+            ImGui::GetContentRegionAvail().x - openWidth - cancelWidth - style.ItemSpacing.x);
+
+        ImGui::PushItemWidth(inputWidth);
+        ImGui::InputTextWithHint("##WebviewUrl", "Enter URL", g_urlPopup.buffer, sizeof(g_urlPopup.buffer));
+        ImGui::PopItemWidth();
+        ImGui::Spacing();
+
+        if (ImGui::Button("Open", ImVec2(openWidth, 0)) && g_urlPopup.buffer[0] != '\0') {
+            const auto it = std::ranges::find_if(g_accounts, 
+                [](const auto& a) { return a.id == g_urlPopup.accountId; });
+            
+            if (it != g_accounts.end()) {
+                Threading::newThread([account = *it, url = std::string(g_urlPopup.buffer)]() {
+                    LaunchWebview(url, account);
+                });
+            }
+            g_urlPopup.buffer[0] = '\0';
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::SameLine(0, style.ItemSpacing.x);
+        if (ImGui::Button("Cancel", ImVec2(cancelWidth, 0))) {
+            g_urlPopup.buffer[0] = '\0';
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+
+    float calculateJoinOptionsHeight(int joinTypeIndex) {
+        const auto& style = ImGui::GetStyle();
+        float height = 0.0f;
+
+        // Title + help marker
+        height += ImGui::GetTextLineHeight() + style.ItemSpacing.y;
+        
+        // Combo box
+        height += ImGui::GetFrameHeight() + style.ItemSpacing.y;
+        
+        // Input fields
+        if (joinTypeIndex == 1) {  // Instance type has two inputs
+            height += ImGui::GetFrameHeight() + style.ItemSpacing.y;
+            height += ImGui::GetFrameHeight() + style.ItemSpacing.y;
+        } else {
+            height += ImGui::GetFrameHeight() + style.ItemSpacing.y;
+        }
+        
+        // Separator
+        height += 1.0f + style.ItemSpacing.y;
+        
+        // Buttons
+        height += ImGui::GetFrameHeight() + style.ItemSpacing.y;
+        height += style.ItemSpacing.y;
+
+        return height;
+    }
+
 }
 
-void RenderFullAccountsTabContent()
-{
-	float availH = GetContentRegionAvail().y;
-	ImGuiStyle &style = GetStyle();
+void RenderAccountsTable(std::vector<AccountData>& accountsToDisplay, 
+                        const char* tableId, float tableHeight) {
+    // Auto-select default account if nothing selected
+    if (g_selectedAccountIds.empty() && g_defaultAccountId != -1) {
+        g_selectedAccountIds.insert(g_defaultAccountId);
+    }
 
-	float join_options_section_height = 0;
+    constexpr ImGuiTableFlags tableFlags = 
+        ImGuiTableFlags_Borders | 
+        ImGuiTableFlags_RowBg | 
+        ImGuiTableFlags_Resizable |
+        ImGuiTableFlags_ScrollY | 
+        ImGuiTableFlags_Hideable | 
+        ImGuiTableFlags_Reorderable |
+        ImGuiTableFlags_ContextMenuInBody;
 
-	join_options_section_height += GetTextLineHeight() + style.ItemSpacing.y;
-	join_options_section_height += GetFrameHeight() + style.ItemSpacing.y;
-	if (join_type_combo_index == 1)
-	{
-		join_options_section_height += GetFrameHeight() + style.ItemSpacing.y;
-		join_options_section_height += GetFrameHeight() + style.ItemSpacing.y;
-	}
-	else
-	{
-		join_options_section_height += GetFrameHeight() + style.ItemSpacing.y;
-	}
-	join_options_section_height += 1.0f + style.ItemSpacing.y;
-	join_options_section_height += GetFrameHeight() + style.ItemSpacing.y;
-	join_options_section_height += style.ItemSpacing.y;
+    const ImVec2 tableSize(0.0f, tableHeight > 0.0f ? tableHeight - 2.0f : 0.0f);
+    if (!ImGui::BeginTable(tableId, COLUMN_COUNT, tableFlags, tableSize)) {
+        renderUrlPopup();
+        return;
+    }
 
-	float separator_height_after_table = 1.0f + style.ItemSpacing.y;
+    // Setup columns
+    ImGui::TableSetupColumn("Display Name", ImGuiTableColumnFlags_WidthStretch, COL_DISPLAY_NAME_WEIGHT);
+    ImGui::TableSetupColumn("Username", ImGuiTableColumnFlags_WidthStretch, COL_USERNAME_WEIGHT);
+    ImGui::TableSetupColumn("UserID", ImGuiTableColumnFlags_WidthStretch, COL_USERID_WEIGHT);
+    ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthStretch, COL_STATUS_WEIGHT);
+    ImGui::TableSetupColumn("Voice", ImGuiTableColumnFlags_WidthStretch, COL_VOICE_WEIGHT);
+    ImGui::TableSetupColumn("Note", ImGuiTableColumnFlags_WidthStretch, COL_NOTE_WEIGHT);
+    ImGui::TableSetupScrollFreeze(0, 1);
 
-	float total_height_for_join_ui_and_sep = separator_height_after_table + join_options_section_height;
+    // Render header
+    ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
+    ImGui::TableNextColumn(); ImGui::TextUnformatted("Display Name");
+    ImGui::TableNextColumn(); ImGui::TextUnformatted("Username");
+    ImGui::TableNextColumn(); ImGui::TextUnformatted("UserID");
+    ImGui::TableNextColumn(); ImGui::TextUnformatted("Status");
+    ImGui::TableNextColumn(); ImGui::TextUnformatted("Voice");
+    ImGui::TableNextColumn(); ImGui::TextUnformatted("Note");
 
-	float tableH = ImMax(GetFrameHeight() * 3.0f, availH - total_height_for_join_ui_and_sep);
-	if (tableH < GetFrameHeight() * 3.0f)
-		tableH = GetFrameHeight() * 3.0f;
-	if (availH <= total_height_for_join_ui_and_sep)
-		tableH = GetFrameHeight() * 3.0f;
+    // Render rows
+    const auto metrics = calculateRowMetrics();
+    for (auto& account : accountsToDisplay) {
+        renderAccountRow(account, metrics);
+    }
 
-	RenderAccountsTable(g_accounts, "AccountsTable", tableH);
+    ImGui::EndTable();
+    renderUrlPopup();
+}
 
-	Separator();
-	RenderJoinOptions();
+void RenderFullAccountsTabContent() {
+    const float availHeight = ImGui::GetContentRegionAvail().y;
+    const auto& style = ImGui::GetStyle();
+
+    const float joinOptionsHeight = calculateJoinOptionsHeight(join_type_combo_index);
+    const float separatorHeight = 1.0f + style.ItemSpacing.y;
+    const float totalReserved = separatorHeight + joinOptionsHeight;
+
+    // Calculate table height with minimum constraints
+    constexpr float MIN_TABLE_HEIGHT_MULTIPLIER = 3.0f;
+    const float minTableHeight = ImGui::GetFrameHeight() * MIN_TABLE_HEIGHT_MULTIPLIER;
+    
+    float tableHeight = std::max(minTableHeight, availHeight - totalReserved);
+    if (availHeight <= totalReserved) {
+        tableHeight = minTableHeight;
+    }
+
+    RenderAccountsTable(g_accounts, "AccountsTable", tableHeight);
+    ImGui::Separator();
+    RenderJoinOptions();
 }
