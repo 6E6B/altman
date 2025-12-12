@@ -7,6 +7,20 @@
 #include <array>
 #include <ctime>
 #include <unordered_map>
+#include <fstream>
+#include <nlohmann/json.hpp>
+#include <iostream>
+#include <vector>
+#include <stdexcept>
+#include <filesystem>
+#include <unordered_map>
+#include <unordered_set>
+#include <ranges>
+#include <algorithm>
+#include <format>
+#include <optional>
+#include <string>
+#include <string_view>
 #include <imgui.h>
 #include "history/log_types.h"
 
@@ -69,24 +83,24 @@ std::string GetExecutablePath();
 #endif
 
 namespace Data {
-	void LoadSettings(const std::string &filename = "settings.json");
+	void LoadSettings(std::string_view filename = "settings.json");
 
-	void SaveSettings(const std::string &filename = "settings.json");
+	void SaveSettings(std::string_view filename = "settings.json");
 
-	void SaveAccounts(const std::string &filename = "accounts.json");
+	void SaveAccounts(std::string_view filename = "accounts.json");
 
-	void LoadAccounts(const std::string &filename = "accounts.json");
+	void LoadAccounts(std::string_view filename = "accounts.json");
 
-	void LoadFavorites(const std::string &filename = "favorites.json");
+	void LoadFavorites(std::string_view filename = "favorites.json");
 
-	void SaveFavorites(const std::string &filename = "favorites.json");
+	void SaveFavorites(std::string_view filename = "favorites.json");
 
-	void LoadFriends(const std::string &filename = "friends.json");
+	void LoadFriends(std::string_view filename = "friends.json");
 
-	void SaveFriends(const std::string &filename = "friends.json");
+	void SaveFriends(std::string_view filename = "friends.json");
 
 
-	std::string StorageFilePath(const std::string &filename);
+	std::string StorageFilePath(std::string_view filename);
 }
 
 #endif

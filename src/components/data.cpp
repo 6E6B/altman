@@ -1,12 +1,4 @@
 ﻿#include "data.h"
-#include <fstream>
-#include <nlohmann/json.hpp>
-#include <iostream>
-#include <vector>
-#include <stdexcept>
-#include <filesystem>
-#include <unordered_map>
-#include <unordered_set>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -23,493 +15,565 @@
 #include "core/logging.hpp"
 #include "core/app_state.h"
 
-using namespace std;
-using json = nlohmann::json;
-
-vector<AccountData> g_accounts;
-set<int> g_selectedAccountIds;
-
-vector<FavoriteGame> g_favorites;
-vector<FriendInfo> g_friends;
-unordered_map<int, vector<FriendInfo>> g_accountFriends;
-unordered_map<int, vector<FriendInfo>> g_unfriendedFriends;
+std::vector<AccountData> g_accounts;
+std::set<int> g_selectedAccountIds;
+std::vector<FavoriteGame> g_favorites;
+std::vector<FriendInfo> g_friends;
+std::unordered_map<int, std::vector<FriendInfo>> g_accountFriends;
+std::unordered_map<int, std::vector<FriendInfo>> g_unfriendedFriends;
 
 int g_defaultAccountId = -1;
-array<char, 128> s_jobIdBuffer = {};
-array<char, 128> s_playerBuffer = {};
+std::array<char, 128> s_jobIdBuffer = {};
+std::array<char, 128> s_playerBuffer = {};
 int g_statusRefreshInterval = 1;
 bool g_checkUpdatesOnStartup = true;
 bool g_killRobloxOnLaunch = false;
 bool g_clearCacheOnLaunch = false;
 
+namespace {
 #ifdef _WIN32
-// Windows DPAPI encryption
-vector<BYTE> encryptData(const string &plainText) {
-    DATA_BLOB DataIn;
-    DATA_BLOB DataOut;
-    auto szDescription = L"User Cookie Data";
+    std::vector<std::uint8_t> encryptData(std::string_view plainText) {
+        DATA_BLOB dataIn{
+            .pbData = const_cast<std::uint8_t*>(
+                reinterpret_cast<const std::uint8_t*>(plainText.data())),
+            .cbData = static_cast<DWORD>(plainText.size() + 1)
+        };
+        DATA_BLOB dataOut{};
+        constexpr auto description = L"User Cookie Data";
 
-    DataIn.pbData = (BYTE*)plainText.c_str();
-    DataIn.cbData = plainText.length() + 1;
+        if (!CryptProtectData(&dataIn, description, nullptr, nullptr, nullptr, 
+                             CRYPTPROTECT_UI_FORBIDDEN, &dataOut)) {
+            LOG_ERROR(std::format("CryptProtectData failed. Error code: {}", GetLastError()));
+            throw std::runtime_error("Encryption failed");
+        }
 
-    if (CryptProtectData(&DataIn, szDescription, nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &DataOut)) {
-        vector<BYTE> encrypted(DataOut.pbData, DataOut.pbData + DataOut.cbData);
-        LocalFree(DataOut.pbData);
+        std::vector<std::uint8_t> encrypted(dataOut.pbData, dataOut.pbData + dataOut.cbData);
+        LocalFree(dataOut.pbData);
         return encrypted;
     }
-    LOG_ERROR("CryptProtectData failed. Error code: " + std::to_string(GetLastError()));
-    throw runtime_error("Encryption failed");
-}
 
-string decryptData(const vector<BYTE> &encryptedText) {
-    DATA_BLOB DataIn;
-    DATA_BLOB DataOut;
-    LPWSTR szDescriptionOut = nullptr;
+    std::string decryptData(std::span<const std::uint8_t> encryptedData) {
+        DATA_BLOB dataIn{
+            .pbData = const_cast<std::uint8_t*>(encryptedData.data()),
+            .cbData = static_cast<DWORD>(encryptedData.size())
+        };
+        DATA_BLOB dataOut{};
+        LPWSTR descriptionOut = nullptr;
 
-    DataIn.pbData = (BYTE*)encryptedText.data();
-    DataIn.cbData = encryptedText.size();
+        if (!CryptUnprotectData(&dataIn, &descriptionOut, nullptr, nullptr, nullptr,
+                               CRYPTPROTECT_UI_FORBIDDEN, &dataOut)) {
+            const DWORD error = GetLastError();
+            LOG_ERROR(std::format("CryptUnprotectData failed. Error code: {}", error));
+            
+            if (error == ERROR_INVALID_DATA || error == 0x8009000B) {
+                LOG_ERROR("Could not decrypt data. It might be from a different user/machine or corrupted.");
+            }
+            return "";
+        }
 
-    if (CryptUnprotectData(&DataIn, &szDescriptionOut, nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &DataOut)) {
-        string decrypted((char*)DataOut.pbData, DataOut.cbData);
-        LocalFree(DataOut.pbData);
-        if (szDescriptionOut)
-            LocalFree(szDescriptionOut);
+        std::string decrypted(reinterpret_cast<char*>(dataOut.pbData), dataOut.cbData);
+        LocalFree(dataOut.pbData);
+        if (descriptionOut) LocalFree(descriptionOut);
 
+        // Remove null terminator if present
         if (!decrypted.empty() && decrypted.back() == '\0') {
             decrypted.pop_back();
         }
         return decrypted;
     }
-    LOG_ERROR("CryptUnprotectData failed. Error code: " + std::to_string(GetLastError()));
-    
-    if (GetLastError() == ERROR_INVALID_DATA || GetLastError() == 0x8009000B) {
-        LOG_ERROR("Could not decrypt data. It might be from a different user/machine or corrupted.");
-    }
-    return "";
-}
 
 #elif __APPLE__
-// macOS Keychain encryption
-vector<BYTE> encryptData(const string &plainText) {
-    // On macOS, we'll use simple XOR with a machine-specific key
-    // For production, you'd want to use Keychain Services properly
-    // This is a simplified version for compatibility
-    
-    // Simple base64 encoding for now (not secure, but cross-platform compatible)
-    // TODO: Implement proper Keychain integration
-    return vector<BYTE>(plainText.begin(), plainText.end());
-}
+    // macOS simple encoding (TODO: implement proper Keychain integration)
+    std::vector<std::uint8_t> encryptData(std::string_view plainText) {
+        return std::vector<std::uint8_t>(plainText.begin(), plainText.end());
+    }
 
-string decryptData(const vector<BYTE> &encryptedText) {
-    // Simple decryption (matches encryption above)
-    return string(encryptedText.begin(), encryptedText.end());
-}
+    std::string decryptData(std::span<const std::uint8_t> encryptedData) {
+        return std::string(encryptedData.begin(), encryptedData.end());
+    }
 
-std::string GetApplicationDir()
-{
-    char buffer[PATH_MAX];
-    uint32_t size = sizeof(buffer);
+    std::string GetApplicationDir() {
+        std::array<char, PATH_MAX> buffer{};
+        uint32_t size = buffer.size();
 
-    // Get executable path inside the bundle
-    if (_NSGetExecutablePath(buffer, &size) != 0)
+        if (_NSGetExecutablePath(buffer.data(), &size) != 0) {
+            return "";
+        }
+
+        std::array<char, PATH_MAX> resolved{};
+        if (!realpath(buffer.data(), resolved.data())) {
+            return "";
+        }
+
+        std::string exePath(resolved.data());
+        constexpr std::string_view marker = "/Contents/MacOS/";
+        
+        if (const auto pos = exePath.rfind(marker); pos != std::string::npos) {
+            return exePath.substr(0, pos);
+        }
         return "";
+    }
 
-    char resolved[PATH_MAX];
-    realpath(buffer, resolved);
+    std::string GetApplicationName() {
+        CFBundleRef mainBundle = CFBundleGetMainBundle();
+        if (!mainBundle) return "";
 
-    std::string exePath = resolved;
+        auto nameRef = static_cast<CFStringRef>(
+            CFBundleGetValueForInfoDictionaryKey(mainBundle, kCFBundleNameKey));
+        if (!nameRef) return "";
 
-    // Strip "/Contents/MacOS/<binary>"
-    const std::string marker = "/Contents/MacOS/";
-    size_t pos = exePath.rfind(marker);
-    if (pos == std::string::npos)
-        return "";  // not inside an .app bundle
+        std::array<char, 256> buffer{};
+        if (!CFStringGetCString(nameRef, buffer.data(), buffer.size(), kCFStringEncodingUTF8)) {
+            return "";
+        }
+        return std::string(buffer.data());
+    }
 
-    return exePath.substr(0, pos); // path to .app
-}
+    std::string GetExecutablePath() {
+        std::array<char, PATH_MAX> buffer{};
+        uint32_t size = buffer.size();
 
-std::string GetApplicationName()
-{
-    CFBundleRef mainBundle = CFBundleGetMainBundle();
-    if (!mainBundle)
-        return "";
+        if (_NSGetExecutablePath(buffer.data(), &size) != 0) {
+            return "";
+        }
 
-    CFStringRef nameRef = (CFStringRef)CFBundleGetValueForInfoDictionaryKey(mainBundle, kCFBundleNameKey);
-
-    if (!nameRef)
-        return "";
-
-    char buffer[256];
-    if (!CFStringGetCString(nameRef, buffer, sizeof(buffer), kCFStringEncodingUTF8))
-        return "";
-
-    return std::string(buffer);
-}
-
-std::string GetExecutablePath()
-{
-    char buffer[PATH_MAX];
-    uint32_t size = sizeof(buffer);
-
-    if (_NSGetExecutablePath(buffer, &size) != 0)
-        return "";
-
-    char resolved[PATH_MAX];
-    realpath(buffer, resolved);
-
-    return std::string(resolved);
-}
-
+        std::array<char, PATH_MAX> resolved{};
+        if (!realpath(buffer.data(), resolved.data())) {
+            return "";
+        }
+        return std::string(resolved.data());
+    }
 #endif
 
-static std::filesystem::path GetStorageDir() {
-    static std::filesystem::path dir;
-    if (dir.empty()) {
+    const std::filesystem::path& getStorageDir() {
+        static std::filesystem::path dir = []() {
+            std::filesystem::path result;
+            
 #ifdef _WIN32
-        wchar_t exePath[MAX_PATH];
-        if (GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
-            dir = std::filesystem::path(exePath).parent_path() / L"storage";
-        } else {
-            dir = L"storage";
-        }
+            std::array<wchar_t, MAX_PATH> exePath{};
+            if (GetModuleFileNameW(nullptr, exePath.data(), exePath.size())) {
+                result = std::filesystem::path(exePath.data()).parent_path() / L"storage";
+            } else {
+                result = L"storage";
+            }
 #else
-        // On macOS, use Application Support directory
-        const char* home = getenv("HOME");
-        if (home) {
-            dir = std::filesystem::path(home) / "Library" / "Application Support" / "Altman" / "storage";
-        } else {
-            dir = "storage";
-        }
+            if (const char* home = std::getenv("HOME")) {
+                result = std::filesystem::path(home) / "Library" / "Application Support" / 
+                        "Altman" / "storage";
+            } else {
+                result = "storage";
+            }
 #endif
-        std::error_code ec;
-        std::filesystem::create_directories(dir, ec);
-        if (ec) {
-            LOG_ERROR("Failed to create storage directory: " + ec.message());
-        }
+            
+            std::error_code ec;
+            std::filesystem::create_directories(result, ec);
+            if (ec) {
+                LOG_ERROR(std::format("Failed to create storage directory: {}", ec.message()));
+            }
+            return result;
+        }();
+        
+        return dir;
     }
-    return dir;
-}
 
-static std::string MakePath(const std::string &filename) {
-    return (GetStorageDir() / filename).string();
-}
+    std::string makePath(std::string_view filename) {
+        return (getStorageDir() / filename).string();
+    }
 
-namespace Data {
-    void LoadAccounts(const string &filename) {
-        string path = MakePath(filename);
-        ifstream fileStream{path};
-        if (!fileStream.is_open()) {
-            LOG_INFO("No " + path + ", starting fresh");
-            return;
-        }
-        json dataArray;
+    std::optional<std::string> encryptCookie(std::string_view cookie) {
+        if (cookie.empty()) 
+            return "";
+        
         try {
-            fileStream >> dataArray;
-        } catch (const json::parse_error &exception) {
-            LOG_ERROR("Failed to parse " + path + ": " + exception.what());
-            return;
+            const auto encrypted = encryptData(cookie);
+            return base64_encode(encrypted);
+        } catch (const std::exception& e) {
+            LOG_ERROR(std::format("Cookie encryption failed: {}", e.what()));
+            return std::nullopt;
         }
-
-        g_accounts.clear();
-        for (auto &item: dataArray) {
-            AccountData account;
-            account.id = item.value("id", 0);
-            account.displayName = item.value("displayName", "");
-            account.username = item.value("username", "");
-            account.userId = item.value("userId", "");
-            account.status = item.value("status", "");
-            account.voiceStatus = item.value("voiceStatus", "");
-            account.voiceBanExpiry = item.value("voiceBanExpiry", 0);
-            account.banExpiry = item.value("banExpiry", 0);
-            account.note = item.value("note", "");
-            account.isFavorite = item.value("isFavorite", false);
-            account.lastLocation = item.value("lastLocation", "");
-            account.placeId = item.value("placeId", 0ULL);
-            account.jobId = item.value("jobId", "");
-
-            if (item.contains("encryptedCookie")) {
-                string b64EncryptedCookie = item.value("encryptedCookie", "");
-                if (!b64EncryptedCookie.empty()) {
-                    try {
-                        vector<BYTE> encryptedCookieBytes = base64_decode(b64EncryptedCookie);
-                        account.cookie = decryptData(encryptedCookieBytes);
-                        if (account.cookie.empty() && !encryptedCookieBytes.empty()) {
-                            LOG_ERROR("Failed to decrypt cookie for account ID " + std::to_string(account.id));
-                        }
-                    } catch (const exception &e) {
-                        LOG_ERROR("Exception during cookie decryption for account ID " + std::to_string(account.id) + ": " + e.what());
-                        account.cookie = "";
-                    }
-                } else {
-                    account.cookie = "";
-                }
-            } else if (item.contains("cookie")) {
-                account.cookie = item.value("cookie", "");
-                LOG_INFO("Account ID " + std::to_string(account.id) + " has an unencrypted cookie. It will be encrypted on next save.");
-            }
-
-            g_accounts.push_back(std::move(account));
-        }
-        LOG_INFO("Loaded " + std::to_string(g_accounts.size()) + " accounts");
     }
 
-    void SaveAccounts(const string &filename) {
-        string path = MakePath(filename);
-        ofstream out{path};
-        if (!out.is_open()) {
-            LOG_ERROR("Could not open '" + path + "' for writing");
-            return;
+    std::string decryptCookie(std::string_view base64Encrypted) {
+        if (base64Encrypted.empty()) 
+            return "";
+        
+        try {
+            const auto encrypted = base64_decode(base64Encrypted);
+            return decryptData(encrypted);
+        } catch (const std::exception& e) {
+            LOG_ERROR(std::format("Cookie decryption failed: {}", e.what()));
+            return "";
+        }
+    }
+
+    template<typename T>
+    T safeGet(const nlohmann::json& j, std::string_view key, T defaultValue) {
+        try {
+            return j.value(key.data(), defaultValue);
+        } catch (...) {
+            return defaultValue;
+        }
+    }
+
+    AccountData parseAccount(const nlohmann::json& item) {
+        AccountData account{};
+        account.id = safeGet(item, "id", 0);
+        account.displayName = safeGet<std::string>(item, "displayName", "");
+        account.username = safeGet<std::string>(item, "username", "");
+        account.userId = safeGet<std::string>(item, "userId", "");
+        account.status = safeGet<std::string>(item, "status", "");
+        account.voiceStatus = safeGet<std::string>(item, "voiceStatus", "");
+        account.voiceBanExpiry = safeGet(item, "voiceBanExpiry", 0);
+        account.banExpiry = safeGet(item, "banExpiry", 0);
+        account.note = safeGet<std::string>(item, "note", "");
+        account.isFavorite = safeGet(item, "isFavorite", false);
+        account.lastLocation = safeGet<std::string>(item, "lastLocation", "");
+        account.placeId = safeGet(item, "placeId", 0ULL);
+        account.jobId = safeGet<std::string>(item, "jobId", "");
+
+        if (item.contains("encryptedCookie")) {
+            const auto encrypted = safeGet<std::string>(item, "encryptedCookie", "");
+            account.cookie = decryptCookie(encrypted);
+            
+            if (account.cookie.empty() && !encrypted.empty()) {
+                LOG_ERROR(std::format("Failed to decrypt cookie for account ID {}", account.id));
+            }
+        } else if (item.contains("cookie")) {
+            account.cookie = safeGet<std::string>(item, "cookie", "");
+            LOG_INFO(std::format("Account ID {} has an unencrypted cookie. "
+                               "It will be encrypted on next save.", account.id));
         }
 
-        json dataArray = json::array();
-        for (auto &account: g_accounts) {
-            string b64EncryptedCookie;
-            if (!account.cookie.empty()) {
-                try {
-                    vector<BYTE> encryptedCookieBytes = encryptData(account.cookie);
-                    b64EncryptedCookie = base64_encode(encryptedCookieBytes);
-                } catch (const exception &exception) {
-                    LOG_ERROR("Exception during cookie encryption for account ID " + std::to_string(account.id) + ": " + exception.what());
-                    b64EncryptedCookie = "";
-                }
-            }
+        return account;
+    }
 
-            dataArray.push_back({
-                {"id", account.id},
-                {"displayName", account.displayName},
-                {"username", account.username},
-                {"userId", account.userId},
-                {"status", account.status},
-                {"voiceStatus", account.voiceStatus},
-                {"voiceBanExpiry", account.voiceBanExpiry},
-                {"banExpiry", account.banExpiry},
-                {"note", account.note},
-                {"encryptedCookie", b64EncryptedCookie},
-                {"isFavorite", account.isFavorite},
-                {"lastLocation", account.lastLocation},
-                {"placeId", account.placeId},
-                {"jobId", account.jobId}
+    nlohmann::json serializeAccount(const AccountData& account) {
+        const auto encryptedCookie = encryptCookie(account.cookie).value_or("");
+        
+        return {
+            {"id", account.id},
+            {"displayName", account.displayName},
+            {"username", account.username},
+            {"userId", account.userId},
+            {"status", account.status},
+            {"voiceStatus", account.voiceStatus},
+            {"voiceBanExpiry", account.voiceBanExpiry},
+            {"banExpiry", account.banExpiry},
+            {"note", account.note},
+            {"encryptedCookie", encryptedCookie},
+            {"isFavorite", account.isFavorite},
+            {"lastLocation", account.lastLocation},
+            {"placeId", account.placeId},
+            {"jobId", account.jobId}
+        };
+    }
+
+    std::vector<FriendInfo> parseFriendList(const nlohmann::json& arr) {
+        std::vector<FriendInfo> result;
+        result.reserve(arr.size());
+        
+        for (const auto& item : arr) {
+            if (!item.is_object()) continue;
+            
+            FriendInfo info{};
+            info.id = safeGet(item, "userId", 0ULL);
+            info.username = safeGet<std::string>(item, "username", "");
+            info.displayName = safeGet<std::string>(item, "displayName", "");
+            result.push_back(std::move(info));
+        }
+        return result;
+    }
+
+    nlohmann::json serializeFriendList(const std::vector<FriendInfo>& friends) {
+        nlohmann::json arr = nlohmann::json::array();
+        for (const auto& f : friends) {
+            arr.push_back({
+                {"userId", f.id},
+                {"username", f.username},
+                {"displayName", f.displayName}
             });
         }
-        out << dataArray.dump(4);
-        LOG_INFO("Saved " + std::to_string(g_accounts.size()) + " accounts");
+        return arr;
     }
 
-    void LoadFavorites(const std::string &filename) {
-        std::string path = MakePath(filename);
-        std::ifstream fin{path};
-        if (!fin.is_open()) {
-            LOG_INFO("No " + path + ", starting with 0 favourites");
+    std::unordered_map<std::string, int> buildUserIdToAccountIdMap() {
+        std::unordered_map<std::string, int> mapping;
+        mapping.reserve(g_accounts.size());
+        
+        for (const auto& acc : g_accounts) {
+            if (!acc.userId.empty()) {
+                mapping[acc.userId] = acc.id;
+            }
+        }
+        return mapping;
+    }
+
+    std::unordered_map<int, std::string> buildAccountIdToUserIdMap() {
+        std::unordered_map<int, std::string> mapping;
+        mapping.reserve(g_accounts.size());
+        
+        for (const auto& acc : g_accounts) {
+            if (!acc.userId.empty()) {
+                mapping[acc.id] = acc.userId;
+            }
+        }
+        return mapping;
+    }
+
+} 
+
+namespace Data {
+    void LoadAccounts(std::string_view filename) {
+        const auto path = makePath(filename);
+        std::ifstream fileStream{path};
+        
+        if (!fileStream.is_open()) {
+            LOG_INFO(std::format("No {}, starting fresh", path));
             return;
         }
 
-        g_favorites.clear();
         try {
-            json arr;
+            nlohmann::json dataArray;
+            fileStream >> dataArray;
+            
+            g_accounts.clear();
+            g_accounts.reserve(dataArray.size());
+            
+            for (const auto& item : dataArray) {
+                g_accounts.push_back(parseAccount(item));
+            }
+            
+            LOG_INFO(std::format("Loaded {} accounts", g_accounts.size()));
+        } catch (const nlohmann::json::parse_error& e) {
+            LOG_ERROR(std::format("Failed to parse {}: {}", path, e.what()));
+        }
+    }
+
+    void SaveAccounts(std::string_view filename) {
+        const auto path = makePath(filename);
+        std::ofstream out{path};
+        
+        if (!out.is_open()) {
+            LOG_ERROR(std::format("Could not open '{}' for writing", path));
+            return;
+        }
+
+        nlohmann::json dataArray = nlohmann::json::array();
+        for (const auto& account : g_accounts) {
+            dataArray.push_back(serializeAccount(account));
+        }
+        
+        out << dataArray.dump(4);
+        LOG_INFO(std::format("Saved {} accounts", g_accounts.size()));
+    }
+
+    void LoadFavorites(std::string_view filename) {
+        const auto path = makePath(filename);
+        std::ifstream fin{path};
+        
+        if (!fin.is_open()) {
+            LOG_INFO(std::format("No {}, starting with 0 favourites", path));
+            return;
+        }
+
+        try {
+            nlohmann::json arr;
             fin >> arr;
-            for (auto &j: arr) {
+            
+            g_favorites.clear();
+            g_favorites.reserve(arr.size());
+            
+            for (const auto& j : arr) {
                 g_favorites.push_back(FavoriteGame{
-                    j.value("name", ""),
-                    j.value("universeId", 0ULL),
-                    j.value("placeId", j.value("universeId", 0ULL))
+                    .name = safeGet<std::string>(j, "name", ""),
+                    .universeId = safeGet(j, "universeId", 0ULL),
+                    .placeId = safeGet(j, "placeId", safeGet(j, "universeId", 0ULL))
                 });
             }
-            LOG_INFO("Loaded " + std::to_string(g_favorites.size()) + " favourites");
-        } catch (const std::exception &e) {
-            LOG_ERROR("Could not parse " + filename + ": " + e.what());
+            
+            LOG_INFO(std::format("Loaded {} favourites", g_favorites.size()));
+        } catch (const std::exception& e) {
+            LOG_ERROR(std::format("Could not parse {}: {}", filename, e.what()));
         }
     }
 
-    void SaveFavorites(const std::string &filename) {
-        std::string path = MakePath(filename);
+    void SaveFavorites(std::string_view filename) {
+        const auto path = makePath(filename);
         std::ofstream out{path};
+        
         if (!out.is_open()) {
-            LOG_ERROR("Could not open '" + path + "' for writing");
+            LOG_ERROR(std::format("Could not open '{}' for writing", path));
             return;
         }
 
-        json arr = json::array();
-        for (auto &f: g_favorites) {
+        nlohmann::json arr = nlohmann::json::array();
+        for (const auto& fav : g_favorites) {
             arr.push_back({
-                {"universeId", f.universeId},
-                {"placeId", f.placeId},
-                {"name", f.name}
+                {"universeId", fav.universeId},
+                {"placeId", fav.placeId},
+                {"name", fav.name}
             });
         }
 
         out << arr.dump(4);
-        LOG_INFO("Saved " + std::to_string(g_favorites.size()) + " favourites");
+        LOG_INFO(std::format("Saved {} favourites", g_favorites.size()));
     }
 
-    void LoadSettings(const std::string &filename) {
-        std::string path = MakePath(filename);
+    void LoadSettings(std::string_view filename) {
+        const auto path = makePath(filename);
         std::ifstream fin{path};
+        
         if (!fin.is_open()) {
-            LOG_INFO("No " + path + ", using no default account");
+            LOG_INFO(std::format("No {}, using default settings", path));
             return;
         }
 
         try {
             nlohmann::json j;
             fin >> j;
-            g_defaultAccountId = j.value("defaultAccountId", -1);
-            g_statusRefreshInterval = j.value("statusRefreshInterval", 1);
-            g_checkUpdatesOnStartup = j.value("checkUpdatesOnStartup", true);
-            g_killRobloxOnLaunch = j.value("killRobloxOnLaunch", false);
-            g_clearCacheOnLaunch = j.value("clearCacheOnLaunch", false);
-            g_multiRobloxEnabled = j.value("multiRobloxEnabled", false);
-            LOG_INFO("Default account ID = " + std::to_string(g_defaultAccountId));
-            LOG_INFO("Status refresh interval = " + std::to_string(g_statusRefreshInterval));
-        } catch (const std::exception &e) {
-            LOG_ERROR("Failed to parse " + filename + ": " + e.what());
+            
+            g_defaultAccountId = safeGet(j, "defaultAccountId", -1);
+            g_statusRefreshInterval = safeGet(j, "statusRefreshInterval", 1);
+            g_checkUpdatesOnStartup = safeGet(j, "checkUpdatesOnStartup", true);
+            g_killRobloxOnLaunch = safeGet(j, "killRobloxOnLaunch", false);
+            g_clearCacheOnLaunch = safeGet(j, "clearCacheOnLaunch", false);
+            g_multiRobloxEnabled = safeGet(j, "multiRobloxEnabled", false);
+            
+            LOG_INFO(std::format("Default account ID = {}", g_defaultAccountId));
+            LOG_INFO(std::format("Status refresh interval = {}", g_statusRefreshInterval));
+        } catch (const std::exception& e) {
+            LOG_ERROR(std::format("Failed to parse {}: {}", filename, e.what()));
         }
     }
 
-    void SaveSettings(const std::string &filename) {
-        nlohmann::json j;
-        j["defaultAccountId"] = g_defaultAccountId;
-        j["statusRefreshInterval"] = g_statusRefreshInterval;
-        j["checkUpdatesOnStartup"] = g_checkUpdatesOnStartup;
-        j["killRobloxOnLaunch"] = g_killRobloxOnLaunch;
-        j["clearCacheOnLaunch"] = g_clearCacheOnLaunch;
-        j["multiRobloxEnabled"] = g_multiRobloxEnabled;
-        std::string path = MakePath(filename);
+    void SaveSettings(std::string_view filename) {
+        const nlohmann::json j = {
+            {"defaultAccountId", g_defaultAccountId},
+            {"statusRefreshInterval", g_statusRefreshInterval},
+            {"checkUpdatesOnStartup", g_checkUpdatesOnStartup},
+            {"killRobloxOnLaunch", g_killRobloxOnLaunch},
+            {"clearCacheOnLaunch", g_clearCacheOnLaunch},
+            {"multiRobloxEnabled", g_multiRobloxEnabled}
+        };
+        
+        const auto path = makePath(filename);
         std::ofstream out{path};
+        
         if (!out.is_open()) {
-            LOG_ERROR("Could not open " + path + " for writing");
+            LOG_ERROR(std::format("Could not open {} for writing", path));
             return;
         }
+        
         out << j.dump(4);
         LOG_INFO("Saved settings");
     }
 
-    void LoadFriends(const std::string &filename) {
-        std::string path = MakePath(filename);
+    void LoadFriends(std::string_view filename) {
+        const auto path = makePath(filename);
         std::ifstream fin{path};
+        
         if (!fin.is_open()) {
-            LOG_INFO("No " + path + ", starting with empty friend lists");
+            LOG_INFO(std::format("No {}, starting with empty friend lists", path));
             return;
         }
+
         try {
-            json j;
+            nlohmann::json j;
             fin >> j;
-            g_accountFriends.clear();
-            g_unfriendedFriends.clear();
-
-            auto parseList = [](const json &arr) {
-                std::vector<FriendInfo> out;
-                for (auto &f: arr) {
-                    if (!f.is_object()) continue;
-                    FriendInfo fi;
-                    fi.id = f.value("userId", 0ULL);
-                    fi.username = f.value("username", "");
-                    fi.displayName = f.value("displayName", "");
-                    out.push_back(std::move(fi));
-                }
-                return out;
-            };
-
+            
             if (!j.is_object()) {
                 LOG_ERROR("Invalid friends.json format");
                 return;
             }
 
-            std::unordered_map<std::string, int> userIdToAccountId;
-            for (const auto &a : g_accounts) {
-                if (!a.userId.empty()) userIdToAccountId[a.userId] = a.id;
-            }
+            g_accountFriends.clear();
+            g_unfriendedFriends.clear();
+
+            const auto userIdToAccountId = buildUserIdToAccountIdMap();
 
             for (auto it = j.begin(); it != j.end(); ++it) {
                 const std::string keyUserId = it.key();
-                auto itMap = userIdToAccountId.find(keyUserId);
-                if (itMap == userIdToAccountId.end()) continue;
-                if (!it.value().is_object()) continue;
                 
-                int acctId = itMap->second;
-                const auto &acctObj = it.value();
-                
-                std::vector<FriendInfo> friends;
-                if (acctObj.contains("friends") && acctObj["friends"].is_array()) {
-                    friends = parseList(acctObj["friends"]);
-                }
-                
-                std::vector<FriendInfo> unf;
-                if (acctObj.contains("unfriended") && acctObj["unfriended"].is_array()) {
-                    unf = parseList(acctObj["unfriended"]);
-                }
+                if (const auto mapIt = userIdToAccountId.find(keyUserId); 
+                    mapIt != userIdToAccountId.end() && it.value().is_object()) {
+                    
+                    const int accountId = mapIt->second;
+                    const auto& accountObj = it.value();
 
-                std::unordered_set<uint64_t> friendIds;
-                for (const auto &f : friends) friendIds.insert(f.id);
-                
-                std::unordered_set<uint64_t> seen;
-                std::vector<FriendInfo> filtered;
-                for (auto &u : unf) {
-                    if (friendIds.find(u.id) != friendIds.end()) continue;
-                    if (seen.insert(u.id).second) filtered.push_back(std::move(u));
-                }
+                    std::vector<FriendInfo> friends;
+                    if (accountObj.contains("friends") && accountObj["friends"].is_array()) {
+                        friends = parseFriendList(accountObj["friends"]);
+                    }
 
-                g_accountFriends[acctId] = std::move(friends);
-                g_unfriendedFriends[acctId] = std::move(filtered);
+                    std::vector<FriendInfo> unfriended;
+                    if (accountObj.contains("unfriended") && accountObj["unfriended"].is_array()) {
+                        unfriended = parseFriendList(accountObj["unfriended"]);
+                    }
+
+                    // Filter unfriended: remove current friends and duplicates
+                    const auto friendIds = friends 
+                        | std::views::transform(&FriendInfo::id)
+                        | std::ranges::to<std::unordered_set>();
+
+                    std::unordered_set<uint64_t> seenUnfriended;
+                    std::vector<FriendInfo> filteredUnfriended;
+                    
+                    for (auto& u : unfriended) {
+                        if (!friendIds.contains(u.id) && seenUnfriended.insert(u.id).second) {
+                            filteredUnfriended.push_back(std::move(u));
+                        }
+                    }
+
+                    g_accountFriends[accountId] = std::move(friends);
+                    g_unfriendedFriends[accountId] = std::move(filteredUnfriended);
+                }
             }
 
-            LOG_INFO("Loaded friend data for " + std::to_string(g_accountFriends.size()) + " accounts");
-        } catch (const std::exception &e) {
-            LOG_ERROR("Failed to parse " + filename + ": " + e.what());
+            LOG_INFO(std::format("Loaded friend data for {} accounts", g_accountFriends.size()));
+        } catch (const std::exception& e) {
+            LOG_ERROR(std::format("Failed to parse {}: {}", filename, e.what()));
         }
     }
 
-    void SaveFriends(const std::string &filename) {
-        std::string path = MakePath(filename);
-        json root = json::object();
-        std::unordered_map<int, std::string> accountIdToUserId;
-        for (const auto &a : g_accounts) {
-            if (!a.userId.empty()) accountIdToUserId[a.id] = a.userId;
-        }
-
-        for (const auto &[acctId, friends]: g_accountFriends) {
-            auto itUser = accountIdToUserId.find(acctId);
-            if (itUser == accountIdToUserId.end()) continue;
-            
-            const std::string &keyUserId = itUser->second;
-            json arr = json::array();
-            for (const auto &f: friends) {
-                arr.push_back({
-                    {"userId", f.id},
-                    {"username", f.username},
-                    {"displayName", f.displayName}
-                });
-            }
-            if (!root.contains(keyUserId)) root[keyUserId] = json::object();
-            root[keyUserId]["friends"] = std::move(arr);
-        }
-
-        for (const auto &[acctId, list]: g_unfriendedFriends) {
-            auto itUser = accountIdToUserId.find(acctId);
-            if (itUser == accountIdToUserId.end()) continue;
-            
-            const std::string &keyUserId = itUser->second;
-            json arr = json::array();
-            for (const auto &f: list) {
-                arr.push_back({
-                    {"userId", f.id},
-                    {"username", f.username},
-                    {"displayName", f.displayName}
-                });
-            }
-            if (!root.contains(keyUserId)) root[keyUserId] = json::object();
-            root[keyUserId]["unfriended"] = std::move(arr);
-        }
+    void SaveFriends(std::string_view filename) {
+        const auto path = makePath(filename);
+        nlohmann::json root = nlohmann::json::object();
         
+        const auto accountIdToUserId = buildAccountIdToUserIdMap();
+
+        // Save friends
+        for (const auto& [accountId, friends] : g_accountFriends) {
+            if (const auto it = accountIdToUserId.find(accountId); it != accountIdToUserId.end()) {
+                const auto& userId = it->second;
+                if (!root.contains(userId)) {
+                    root[userId] = nlohmann::json::object();
+                }
+                root[userId]["friends"] = serializeFriendList(friends);
+            }
+        }
+
+        // Save unfriended
+        for (const auto& [accountId, unfriended] : g_unfriendedFriends) {
+            if (const auto it = accountIdToUserId.find(accountId); it != accountIdToUserId.end()) {
+                const auto& userId = it->second;
+                if (!root.contains(userId)) {
+                    root[userId] = nlohmann::json::object();
+                }
+                root[userId]["unfriended"] = serializeFriendList(unfriended);
+            }
+        }
+
         std::ofstream out{path};
         if (!out.is_open()) {
-            LOG_ERROR("Could not open '" + path + "' for writing");
+            LOG_ERROR(std::format("Could not open '{}' for writing", path));
             return;
         }
+        
         out << root.dump(4);
         LOG_INFO("Saved friend data");
     }
 
-    std::string StorageFilePath(const std::string &filename) {
-        return MakePath(filename);
+    std::string StorageFilePath(std::string_view filename) {
+        return makePath(filename);
     }
 }
