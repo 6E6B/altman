@@ -26,7 +26,6 @@
 #include <algorithm>
 #include <string>
 
-// Global Metal device
 static id<MTLDevice> g_metalDevice = nil;
 static id<MTLCommandQueue> g_commandQueue = nil;
 
@@ -88,9 +87,7 @@ void ReloadFonts(float dpiScale) {
     style.ScaleAllSizes(dpiScale);
 }
 
-// Load texture from memory (Metal implementation)
 bool LoadTextureFromMemory(const void *data, size_t data_size, void **out_texture, int *out_width, int *out_height) {
-    // Decode image using stb_image
     int image_width = 0;
     int image_height = 0;
     unsigned char *image_data = stbi_load_from_memory(
@@ -105,7 +102,6 @@ bool LoadTextureFromMemory(const void *data, size_t data_size, void **out_textur
     if (image_data == NULL)
         return false;
 
-    // Create Metal texture
     MTLTextureDescriptor *textureDescriptor = [MTLTextureDescriptor
         texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
         width:image_width
@@ -133,7 +129,6 @@ bool LoadTextureFromMemory(const void *data, size_t data_size, void **out_textur
     return true;
 }
 
-// Load texture from file
 bool LoadTextureFromFile(const char *file_name, void **out_texture, int *out_width, int *out_height) {
     FILE *f = fopen(file_name, "rb");
     if (f == NULL)
@@ -156,6 +151,15 @@ bool LoadTextureFromFile(const char *file_name, void **out_texture, int *out_wid
     return ret;
 }
 
+@interface AppDelegate : NSObject <NSApplicationDelegate>
+@end
+
+@implementation AppDelegate
+- (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender {
+    return YES;
+}
+@end
+
 @interface AppViewController : NSViewController <MTKViewDelegate>
 @end
 
@@ -168,12 +172,10 @@ bool LoadTextureFromFile(const char *file_name, void **out_texture, int *out_wid
 - (instancetype)init {
     self = [super init];
     if (self) {
-        // Create Metal device
         g_metalDevice = MTLCreateSystemDefaultDevice();
         _commandQueue = [g_metalDevice newCommandQueue];
         g_commandQueue = _commandQueue;
 
-        // Setup Dear ImGui context
         IMGUI_CHECKVERSION();
         _imguiContext = ImGui::CreateContext();
         ImGuiIO &io = ImGui::GetIO(); (void)io;
@@ -181,8 +183,7 @@ bool LoadTextureFromFile(const char *file_name, void **out_texture, int *out_wid
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 
         ImGui::StyleColorsDark();
-        
-        // Load fonts
+
         ReloadFonts(1.0f);
     }
     return self;
@@ -205,13 +206,11 @@ bool LoadTextureFromFile(const char *file_name, void **out_texture, int *out_wid
 - (void)viewDidLoad {
     [super viewDidLoad];
 
-    // Setup Platform/Renderer backends
     ImGui_ImplOSX_Init(self.view);
     ImGui_ImplMetal_Init(g_metalDevice);
 }
 
 - (void)drawInMTKView:(MTKView *)view {
-    // Process main thread tasks
     MainThread::Process();
 
     ImGuiIO &io = ImGui::GetIO();
@@ -229,12 +228,10 @@ bool LoadTextureFromFile(const char *file_name, void **out_texture, int *out_wid
         return;
     }
 
-    // Start the Dear ImGui frame
     ImGui_ImplMetal_NewFrame(renderPassDescriptor);
     ImGui_ImplOSX_NewFrame(view);
     ImGui::NewFrame();
 
-    // Render UI
     const ImGuiViewport *viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(viewport->WorkSize);
@@ -244,7 +241,6 @@ bool LoadTextureFromFile(const char *file_name, void **out_texture, int *out_wid
 
     ImGui::PopStyleVar(1);
 
-    // Rendering
     ImGui::Render();
     ImDrawData *drawData = ImGui::GetDrawData();
 
@@ -270,7 +266,6 @@ bool LoadTextureFromFile(const char *file_name, void **out_texture, int *out_wid
 
 int main(int argc, const char * argv[]) {
     @autoreleasepool {
-        // Load data before creating UI
         Data::LoadSettings("settings.json");
         if (g_checkUpdatesOnStartup) {
             CheckForUpdates();
@@ -278,7 +273,6 @@ int main(int argc, const char * argv[]) {
         Data::LoadAccounts("accounts.json");
         Data::LoadFriends("friends.json");
 
-        // Start background refresh thread
         auto refreshAccounts = [] {
             std::vector<int> invalidIds;
             std::string names;
@@ -305,8 +299,7 @@ int main(int argc, const char * argv[]) {
                     g_selectedAccountIds.erase(acct.id);
                 }
             }
-            
-            // Refresh all account info...
+
             for (auto &acct: g_accounts) {
                 if (acct.cookie.empty() && acct.userId.empty())
                     continue;
@@ -418,11 +411,12 @@ int main(int argc, const char * argv[]) {
             }
         });
 
-        // Create application
         NSApplication *app = [NSApplication sharedApplication];
         [app setActivationPolicy:NSApplicationActivationPolicyRegular];
 
-        // Create window
+        AppDelegate *appDelegate = [[AppDelegate alloc] init];
+        [app setDelegate:appDelegate];
+
         NSRect frame = NSMakeRect(0, 0, 1000, 560);
         NSWindow *window = [[NSWindow alloc]
             initWithContentRect:frame
@@ -433,15 +427,12 @@ int main(int argc, const char * argv[]) {
         [window setTitle:@"AltMan"];
         [window center];
 
-        // Create view controller
         AppViewController *viewController = [[AppViewController alloc] init];
         [window setContentViewController:viewController];
 
-        // Show window
         [window makeKeyAndOrderFront:nil];
         [app activateIgnoringOtherApps:YES];
 
-        // Run app
         [app run];
     }
     return 0;
