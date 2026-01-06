@@ -27,20 +27,23 @@ static NSMutableDictionary *GetWebByUser() {
     return g_webByUser;
 }
 
-@interface WebViewWindowController : NSObject <NSWindowDelegate>
+@interface WebViewWindowController : NSObject <NSWindowDelegate, WKNavigationDelegate>
 @property (strong) NSWindow *window;
 @property (strong) WKWebView *webView;
 @property (strong) NSString *cookieValue;
 @property (strong) NSString *userDataFolder;
-@property (strong) NSString *accountKey;  // Unique key for this account
+@property (strong) NSString *accountKey;
+@property (copy) void(^cookieCallback)(NSString *);
 
 - (instancetype)initWithURL:(NSString *)url
                       title:(NSString *)title
                      cookie:(NSString *)cookie
                      userId:(NSString *)userId
-                 accountKey:(NSString *)accountKey;
+                 accountKey:(NSString *)accountKey
+              cookieCallback:(void(^)(NSString *))callback;
 - (void)show;
 - (void)injectCookie;
+- (void)extractAndNotifyCookie;
 @end
 
 @implementation WebViewWindowController
@@ -49,13 +52,14 @@ static NSMutableDictionary *GetWebByUser() {
                       title:(NSString *)title
                      cookie:(NSString *)cookie
                      userId:(NSString *)userId
-                 accountKey:(NSString *)accountKey {
+                 accountKey:(NSString *)accountKey
+              cookieCallback:(void(^)(NSString *))callback {
     self = [super init];
     if (self) {
         _cookieValue = cookie;
         _accountKey = [accountKey copy];
+        _cookieCallback = [callback copy];
 
-        // Derive per-user data folder
         std::string userDataPath;
         if (userId && [userId length] > 0) {
             std::string userIdStr = [userId UTF8String];
@@ -85,7 +89,6 @@ static NSMutableDictionary *GetWebByUser() {
 
         _userDataFolder = [NSString stringWithUTF8String:userDataPath.c_str()];
 
-        // Create window
         NSRect frame = NSMakeRect(100, 100, 1280, 800);
         NSWindowStyleMask styleMask = NSWindowStyleMaskTitled |
                                       NSWindowStyleMaskClosable |
@@ -99,31 +102,38 @@ static NSMutableDictionary *GetWebByUser() {
         [_window setTitle:title];
         [_window setDelegate:self];
 
-        // Create WKWebView configuration with custom data store
         WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
 
-        // Use non-persistent data store for isolated sessions
-        if (cookie && [cookie length] > 0) {
+        config.suppressesIncrementalRendering = NO; // Don't wait for full page
+
+        if (callback != nil || (cookie && [cookie length] > 0)) {
             config.websiteDataStore = [WKWebsiteDataStore nonPersistentDataStore];
         } else {
             config.websiteDataStore = [WKWebsiteDataStore defaultDataStore];
         }
 
-        // Create WKWebView
+        config.mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypeNone;
+
         _webView = [[WKWebView alloc] initWithFrame:[[_window contentView] bounds]
                                       configuration:config];
         _webView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+        _webView.navigationDelegate = self;
 
-        // Enable developer extras
+         [_webView setWantsLayer:YES];
+        _webView.layer.drawsAsynchronously = YES;
+
         [_webView.configuration.preferences setValue:@YES forKey:@"developerExtrasEnabled"];
+
+        WKPreferences *prefs = _webView.configuration.preferences;
+        prefs.javaScriptCanOpenWindowsAutomatically = YES;
+        [prefs setValue:@YES forKey:@"acceleratedCompositingEnabled"];
+        [prefs setValue:@YES forKey:@"webGLEnabled"];
 
         [[_window contentView] addSubview:_webView];
 
-        // Inject cookie before loading
         if (cookie && [cookie length] > 0) {
             [self injectCookieWithCompletion:^{
                 [self preWarmNetwork];
-
                 NSURL *nsURL = [NSURL URLWithString:url];
                 if (nsURL) {
                     NSURLRequest *request = [NSURLRequest requestWithURL:nsURL];
@@ -132,7 +142,6 @@ static NSMutableDictionary *GetWebByUser() {
             }];
         } else {
             [self preWarmNetwork];
-
             NSURL *nsURL = [NSURL URLWithString:url];
             if (nsURL) {
                 NSURLRequest *request = [NSURLRequest requestWithURL:nsURL];
@@ -141,6 +150,35 @@ static NSMutableDictionary *GetWebByUser() {
         }
     }
     return self;
+}
+
+- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
+    if (_cookieCallback) {
+        NSString *urlString = webView.URL.absoluteString;
+
+        if ([urlString containsString:@"roblox.com"]) {
+            [self extractAndNotifyCookie];
+        }
+    }
+}
+
+- (void)extractAndNotifyCookie {
+    WKHTTPCookieStore *cookieStore = _webView.configuration.websiteDataStore.httpCookieStore;
+
+    [cookieStore getAllCookies:^(NSArray<NSHTTPCookie *> *cookies) {
+        NSString *robloSecurityValue = nil;
+
+        for (NSHTTPCookie *cookie in cookies) {
+            if ([cookie.name isEqualToString:@".ROBLOSECURITY"]) {
+                robloSecurityValue = cookie.value;
+                break;
+            }
+        }
+
+        if (robloSecurityValue && self.cookieCallback) {
+            self.cookieCallback(robloSecurityValue);
+        }
+    }];
 }
 
 - (void)preWarmNetwork {
@@ -156,21 +194,17 @@ static NSMutableDictionary *GetWebByUser() {
 
     WKHTTPCookieStore *cookieStore = _webView.configuration.websiteDataStore.httpCookieStore;
 
-    NSDate *expirationDate = [NSDate dateWithTimeIntervalSinceNow:(60 * 60 * 24 * 365 * 10)];
-
     NSMutableDictionary *cookieProperties = [NSMutableDictionary dictionary];
     [cookieProperties setObject:@".ROBLOSECURITY" forKey:NSHTTPCookieName];
     [cookieProperties setObject:_cookieValue forKey:NSHTTPCookieValue];
     [cookieProperties setObject:@".roblox.com" forKey:NSHTTPCookieDomain];
     [cookieProperties setObject:@"/" forKey:NSHTTPCookiePath];
-    [cookieProperties setObject:expirationDate forKey:NSHTTPCookieExpires];
     [cookieProperties setObject:@"TRUE" forKey:NSHTTPCookieSecure];
 
     NSHTTPCookie *cookie = [NSHTTPCookie cookieWithProperties:cookieProperties];
 
     if (cookie) {
         [cookieStore setCookie:cookie completionHandler:^{
-            NSLog(@"Cookie injected successfully");
             if (completion) completion();
         }];
     } else {
@@ -189,7 +223,6 @@ static NSMutableDictionary *GetWebByUser() {
 }
 
 - (void)windowWillClose:(NSNotification *)notification {
-    // Remove from global dictionary to allow new window for this account
     if (_accountKey) {
         [GetWebByUser() removeObjectForKey:_accountKey];
     }
@@ -203,16 +236,23 @@ static NSMutableDictionary *GetWebByUser() {
 void LaunchWebview(const std::string &url,
                    const std::string &windowName,
                    const std::string &cookie,
-                   const std::string &userId) {
-    // Copy std::strings (safe to capture)
+                   const std::string &userId,
+                   CookieCallback onCookieExtracted) {
     std::string urlCopy = url;
     std::string titleCopy = windowName;
     std::string cookieCopy = cookie;
     std::string userIdCopy = userId;
 
+    void(^objcCallback)(NSString *) = nullptr;
+    if (onCookieExtracted) {
+        objcCallback = ^(NSString *cookieValue) {
+            std::string cppCookie = [cookieValue UTF8String];
+            onCookieExtracted(cppCookie);
+        };
+    }
+
     dispatch_async(dispatch_get_main_queue(), ^{
         @autoreleasepool {
-            // Convert to NSString on main thread inside autorelease pool
             NSString *nsUrl = [NSString stringWithUTF8String:urlCopy.c_str()];
             NSString *nsTitle = [NSString stringWithUTF8String:titleCopy.c_str()];
             NSString *nsCookie = cookieCopy.empty() ? nil :
@@ -220,40 +260,37 @@ void LaunchWebview(const std::string &url,
             NSString *nsUserId = userIdCopy.empty() ? nil :
                 [NSString stringWithUTF8String:userIdCopy.c_str()];
 
-            // Generate unique key for this account
             NSString *accountKey;
-            if (nsUserId && [nsUserId length] > 0) {
+            if (objcCallback != nil) {
+                accountKey = [NSString stringWithFormat:@"login_%f",
+                             [[NSDate date] timeIntervalSince1970]];
+            } else if (nsUserId && [nsUserId length] > 0) {
                 accountKey = nsUserId;
             } else if (nsCookie && [nsCookie length] > 0) {
-                // Hash the cookie for the key
                 size_t h = std::hash<std::string>{}([nsCookie UTF8String]);
                 accountKey = [NSString stringWithFormat:@"cookie_%016llX", (unsigned long long)h];
             } else {
-                // Fallback: use URL as key (less ideal but prevents duplicates)
                 accountKey = nsUrl;
             }
 
-            // Check if window already exists for this account
             NSMutableDictionary *dict = GetWebByUser();
             WebViewWindowController *existing = dict[accountKey];
 
-            if (existing) {
-                // Window already exists - just bring it to front
+            if (existing && objcCallback == nil) {
                 [existing show];
                 [existing.window makeKeyAndOrderFront:nil];
                 [NSApp activateIgnoringOtherApps:YES];
                 return;
             }
 
-            // Create new controller
             WebViewWindowController *controller = [[WebViewWindowController alloc]
                 initWithURL:nsUrl
                       title:nsTitle
                      cookie:nsCookie
                      userId:nsUserId
-                 accountKey:accountKey];
+                 accountKey:accountKey
+              cookieCallback:objcCallback];
 
-            // Store controller in dictionary
             dict[accountKey] = controller;
 
             [controller show];
@@ -262,8 +299,7 @@ void LaunchWebview(const std::string &url,
     });
 }
 
-// Convenience overload for AccountData
 void LaunchWebview(const std::string &url, const AccountData &account) {
     std::string windowName = account.displayName.empty() ? account.username : account.displayName;
-    LaunchWebview(url, windowName, account.cookie, account.userId);
+    LaunchWebview(url, windowName, account.cookie, account.userId, nullptr);
 }
