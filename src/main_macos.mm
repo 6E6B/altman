@@ -259,7 +259,7 @@ bool LoadTextureFromFile(const char *file_name, void **out_texture, int *out_wid
 }
 
 - (void)mtkView:(MTKView *)view drawableSizeWillChange:(CGSize)size {
-    // Handle resize if needed
+    // Handle resize
 }
 
 @end
@@ -268,7 +268,32 @@ int main(int argc, const char * argv[]) {
     @autoreleasepool {
         Data::LoadSettings("settings.json");
         if (g_checkUpdatesOnStartup) {
-            CheckForUpdates();
+            /*
+                ## GitHub Release Setup
+
+                For delta updates to work, structure your releases like this:
+                ```
+                Release v2.0.0
+                ├── AltMan-Windows.exe          (full installer)
+                ├── AltMan-macOS.dmg            (full installer)
+                ├── AltMan-Linux.AppImage       (full installer)
+                ├── AltMan-Delta-1.9.0-to-2.0.0.patch    (delta from 1.9.0)
+                ├── AltMan-Delta-1.8.0-to-2.0.0.patch    (delta from 1.8.0)
+                └── AltMan-Windows-beta.exe     (beta channel)
+
+
+                Creating Delta Patches
+                Windows (xdelta3):
+                ``bash xdelta3 -e -s AltMan-v1.9.0.exe AltMan-v2.0.0.exe AltMan-Delta-1.9.0-to-2.0.0.patch```
+                Unix (bsdiff):
+                ```bash bsdiff AltMan-v1.9.0.AppImage AltMan-v2.0.0.AppImage AltMan-Delta-1.9.0-to-2.0.0.patch```
+                Dependencies Needed
+             */
+            AutoUpdater::Initialize();
+            AutoUpdater::SetBandwidthLimit(5_MB);
+            AutoUpdater::SetShowNotifications(true);
+            AutoUpdater::SetUpdateChannel(UpdateChannel::Stable);
+            AutoUpdater::SetAutoUpdate(true, true, false);
         }
         Data::LoadAccounts("accounts.json");
         Data::LoadFriends("friends.json");
@@ -388,7 +413,7 @@ int main(int argc, const char * argv[]) {
                 MainThread::Post([invalidIds, namesCopy]() {
                     char buf[512];
                     snprintf(buf, sizeof(buf), "Invalid cookies for: %s. Remove them?", namesCopy.c_str());
-                    ConfirmPopup::Add(buf, [invalidIds]() {
+                    ConfirmPopup::AddYesNo(buf, [invalidIds]() {
                         erase_if(g_accounts, [&](const AccountData &a) {
                             return std::find(invalidIds.begin(), invalidIds.end(), a.id) != invalidIds.end();
                         });

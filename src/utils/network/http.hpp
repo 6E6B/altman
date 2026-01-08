@@ -12,59 +12,96 @@
 #include "core/logging.hpp"
 
 namespace HttpClient {
-    struct Response {
-        int status_code;
-        std::string text;
-        std::map<std::string, std::string> headers;
-        std::string final_url;
-    };
+	struct Response {
+		int status_code;
+		std::string text;
+		std::map<std::string, std::string> headers;
+		std::string final_url;
+	};
 
-    struct BinaryResponse {
-        int status_code;
-        std::vector<uint8_t> data;
-        std::map<std::string, std::string> headers;
-        std::string final_url;
-    };
+	struct BinaryResponse {
+		int status_code;
+		std::vector<uint8_t> data;
+		std::map<std::string, std::string> headers;
+		std::string final_url;
+	};
 
-    using ProgressCallback = std::function<void(size_t downloaded, size_t total)>;
+	using ProgressCallback = std::function<void(size_t downloaded, size_t total)>;
 
-    inline std::string build_kv_string(
-        std::initializer_list<std::pair<const std::string, std::string>> items,
-        char sep = '&'
-    ) {
-        std::ostringstream ss;
-        bool first = true;
-        for (const auto& kv : items) {
-            if (!first) ss << sep;
-            first = false;
-            ss << kv.first << '=' << kv.second;
-        }
-        return ss.str();
-    }
+	inline std::string build_kv_string(
+		std::initializer_list<std::pair<const std::string, std::string>> items,
+		char sep = '&'
+	) {
+		std::ostringstream ss;
+		bool first = true;
+		for (const auto& kv : items) {
+			if (!first) ss << sep;
+			first = false;
+			ss << kv.first << '=' << kv.second;
+		}
+		return ss.str();
+	}
 
-    inline Response get(
-        const std::string& url,
-        std::initializer_list<std::pair<const std::string, std::string>> headers = {},
-        cpr::Parameters params = {},
-        bool follow_redirects = true,
-        int max_redirects = 10
-    ) {
-        auto r = cpr::Get(
-            cpr::Url{url},
-            cpr::Header{headers},
-            params,
-            cpr::Redirect(follow_redirects ? max_redirects : 0L)
-        );
+	inline Response get_impl(
+		const std::string& url,
+		const cpr::Header& hdr,
+		const cpr::Parameters& params,
+		bool follow_redirects,
+		int max_redirects
+	) {
+		auto r = cpr::Get(
+			cpr::Url{url},
+			hdr,
+			params,
+			cpr::Redirect(follow_redirects ? max_redirects : 0L)
+		);
 
-        std::map<std::string, std::string> hdrs(r.header.begin(), r.header.end());
+		std::map<std::string, std::string> hdrs(r.header.begin(), r.header.end());
 
-        return {
-            static_cast<int>(r.status_code),
-            r.text,
-            hdrs,
-            r.url.str()
-        };
-    }
+		return {
+			static_cast<int>(r.status_code),
+			r.text,
+			hdrs,
+			r.url.str()
+		};
+	}
+
+	inline Response get(
+		const std::string& url,
+		std::initializer_list<std::pair<std::string, std::string>> headers = {},
+		const cpr::Parameters& params = {},
+		bool follow_redirects = true,
+		int max_redirects = 10
+	) {
+		cpr::Header hdr;
+
+		for (const auto& [k, v] : headers)
+			hdr.emplace(k, v);
+
+		return get_impl(url, hdr, params, follow_redirects, max_redirects);
+	}
+
+
+	inline Response get(
+		const std::string& url,
+		std::span<const std::pair<std::string, std::string>> headers,
+		const cpr::Parameters& params = {},
+		bool follow_redirects = true,
+		int max_redirects = 10
+	) {
+		cpr::Header hdr;
+
+		for (const auto& [k, v] : headers)
+			hdr.emplace(k, v);
+
+		return get_impl(
+			url,
+			hdr,
+			params,
+			follow_redirects,
+			max_redirects
+		);
+	}
 
     inline BinaryResponse get_binary(
         const std::string& url,

@@ -15,13 +15,21 @@
 ## Features
 
 - **Multi-Account Management** – Add, organize, and securely store cookies for multiple Roblox accounts.
-- **Quick Join** – Instantly join games via **JobID** or **PlaceID**.
+- **Quick Join** – Instantly join games via **JobID** or **PlaceID** or **Private Server Share Link**
 - **Friends Integration** – View and manage friends per account.
 - **Friend Requests** – Send friend requests directly from the interface.
 - **Server Browser** – Explore active Roblox game servers.
+- **Private Servers**
+  - View Joinable **Private Servers**
+  - Manage **Private Servers** You Are The Owner Of
 - **Advanced Filtering** – Sort servers by ping or player count.
 - **Game Discovery** – Search Roblox games by title or keyword.
 - **Log Parser** – Convert Roblox logs into a human-readable format.
+- **Multiple Client Support** – Assign different Roblox clients per account:
+   - Default
+   - Hydrogen
+   - Delta
+   - MacSploit
 
 ---
 
@@ -45,6 +53,7 @@
 - **By JobID**: Enter the JobID in the Quick Join field.
 - **By PlaceID**: Use a valid PlaceID to connect to a server.
 - **By Username**: Connect directly to a user's session (if joins are enabled).
+- **Private Server Link** – Paste a private server share link to join instantly.
 
 > 💡 **Tip**: You can also join games through the **Servers** or **Games** tabs.
 
@@ -59,6 +68,7 @@
 ## Requirements
 
 - Windows 10 or 11 (Tested for Windows 11 24H2)
+- MacOS 13.3+
 - Active internet connection
 
 ## Building from Source

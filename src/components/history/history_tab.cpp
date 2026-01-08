@@ -509,7 +509,7 @@ void RenderHistoryTab() {
     }
     ImGui::SameLine();
     if (ImGui::Button(std::format("{} Clear Logs", ICON_TRASH).c_str())) {
-        ConfirmPopup::Add("Clear all logs?", []() {
+        ConfirmPopup::AddYesNo("Clear all logs?", []() {
             clearLogs();
             g_search_buffer[0] = '\0';
             g_search_active = false;

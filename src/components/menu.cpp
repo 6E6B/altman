@@ -307,7 +307,7 @@ bool RenderMainMenu() {
             const std::string deleteText = std::format("Delete {} Selected", g_selectedAccountIds.size());
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.f, 0.4f, 0.4f, 1.f));
             if (ImGui::MenuItem(deleteText.c_str())) {
-                ConfirmPopup::Add("Delete selected accounts?", []() {
+                ConfirmPopup::AddYesNo("Delete selected accounts?", []() {
                     std::erase_if(
                         g_accounts,
                         [](const AccountData& acct) {

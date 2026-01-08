@@ -166,6 +166,8 @@ int g_activeTab = Tab_Accounts;
 uint64_t g_targetPlaceId_ServersTab = 0;
 uint64_t g_targetUniverseId_ServersTab = 0;
 
+#include "utils/system/update.h"
+
 bool RenderUI() {
     const bool exitFromMenu = RenderMainMenu();
 
@@ -193,6 +195,9 @@ bool RenderUI() {
 
     ModalPopup::Render();
     ConfirmPopup::Render();
+	float deltaTime = ImGui::GetIO().DeltaTime;
+	UpdateNotification::Update(deltaTime);
+	UpdateNotification::Render();
 
     return exitFromMenu;
 }

@@ -391,7 +391,7 @@ namespace {
             };
             
             if (eligible >= WEBVIEW_CONFIRM_THRESHOLD) {
-                ConfirmPopup::Add(std::format("Open {} webviews?", eligible), launchAll);
+                ConfirmPopup::AddYesNo(std::format("Open {} webviews?", eligible), launchAll);
             } else {
                 launchAll();
             }
@@ -410,7 +410,7 @@ namespace {
             };
             
             if (eligible >= WEBVIEW_CONFIRM_THRESHOLD) {
-                ConfirmPopup::Add("Open webviews?", launchAll);
+                ConfirmPopup::AddYesNo("Open webviews?", launchAll);
             } else {
                 launchAll();
             }
@@ -658,7 +658,7 @@ void RenderAccountContextMenu(AccountData& account, const std::string& uniqueCon
         
         if (ImGui::MenuItem(std::format("Remove {} Accounts", removeCount).c_str())) {
             std::vector<int> idsToRemove(g_selectedAccountIds.begin(), g_selectedAccountIds.end());
-            ConfirmPopup::Add(
+            ConfirmPopup::AddYesNo(
                 std::format("Delete {} accounts?", removeCount),
                 [idsToRemove]() {
                     const std::unordered_set<int> toRemove(idsToRemove.begin(), idsToRemove.end());
@@ -684,7 +684,7 @@ void RenderAccountContextMenu(AccountData& account, const std::string& uniqueCon
     } else {
         ImGui::PushStyleColor(ImGuiCol_Text, getStatusColor("Terminated"));
         if (ImGui::MenuItem("Remove Account")) {
-            ConfirmPopup::Add(
+            ConfirmPopup::AddYesNo(
                 std::format("Delete {}?", account.displayName),
                 [id = account.id, displayName = account.displayName, username = account.username]() {
                     LOG_INFO(std::format("Attempting to delete account: {} (ID: {})", displayName, id));

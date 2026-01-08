@@ -352,7 +352,7 @@ namespace {
         ImGui::Separator();
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
         if (ImGui::MenuItem("Unfriend")) {
-            ConfirmPopup::Add(
+            ConfirmPopup::AddYesNo(
                 std::format("Unfriend {}?", frend.username),
                 [frend, cookie = account.cookie, accountId = account.id]() {
                     Threading::newThread([frend, cookie, accountId]() {
