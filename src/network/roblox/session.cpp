@@ -3,7 +3,7 @@
 #include <format>
 #include <nlohmann/json.hpp>
 
-#include "../http.h"
+#include "network/http.h"
 #include "auth.h"
 #include "common.h"
 #include "console/console.h"

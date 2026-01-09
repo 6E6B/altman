@@ -5,7 +5,7 @@
 #include <format>
 
 #include "utils/time_utils.h"
-#include "../http.h"
+#include "network/http.h"
 #include "console/console.h"
 
 namespace Roblox {

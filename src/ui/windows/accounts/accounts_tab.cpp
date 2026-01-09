@@ -1,5 +1,4 @@
 #include "accounts_context_menu.h"
-#include "accounts_context_menu.h"
 #include "accounts_join_ui.h"
 #include "imgui_internal.h"
 #include "accounts.h"
@@ -28,8 +27,8 @@
 #include "network/roblox/social.h"
 #include "utils/threading.h"
 
-#include "../components.h"
-#include "../../ui.h"
+#include "ui/windows/components.h"
+#include "ui/ui.h"
 #include "components/data.h"
 
 namespace {

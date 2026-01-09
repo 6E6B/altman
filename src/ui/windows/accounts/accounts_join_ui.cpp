@@ -14,11 +14,11 @@
 #include <array>
 #include <sstream>
 
-#include "../../ui.h"
+#include "ui/ui.h"
 #include "utils/account_utils.h"
 #include "components/data.h"
 #include "console/console.h"
-#include "utils/app_state.h"
+#include "components/data.h"
 #include "ui/widgets/bottom_right_status.h"
 #include "network/roblox/common.h"
 #include "network/roblox/auth.h"

@@ -20,7 +20,6 @@
 #include "history_utils.h"
 #include "utils/time_utils.h"
 
-#include "../../ui.h"
 #include "utils/account_utils.h"
 #include "../accounts/accounts_join_ui.h"
 #include "ui/widgets/context_menus.h"

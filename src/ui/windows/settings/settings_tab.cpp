@@ -1,4 +1,4 @@
-#include "ipa_installer.h"
+#include "network/ipa_installer.h"
 #include "settings.h"
 #include <algorithm>
 #include <array>
@@ -13,11 +13,9 @@
 #include <unordered_map>
 #include <vector>
 
-#include "../components.h"
 #include "components/data.h"
-#include "utils/app_state.h"
 #include "system/multi_instance.h"
-#include "../console/console.h"
+#include "console/console.h"
 #include "network/client_manager.h"
 
 static bool g_requestOpenConsoleModal = false;

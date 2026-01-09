@@ -9,7 +9,7 @@
 #include <nlohmann/json.hpp>
 
 #include "ui/windows/components.h"
-#include "../http.h"
+#include "network/http.h"
 #include "utils/threading.h"
 #include "auth.h"
 #include "console/console.h"

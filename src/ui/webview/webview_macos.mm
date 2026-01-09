@@ -1,10 +1,10 @@
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
-#include "webview.h"
-#include "../../components/data.h"
 #include <thread>
 #include <filesystem>
 #include <memory>
+#include "webview.h"
+#include "components/data.h"
 
 static inline const std::string kUserDataFolder = [] {
     const char* home = getenv("HOME");

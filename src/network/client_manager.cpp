@@ -13,8 +13,8 @@
 #include "console/console.h"
 #include "http.h"
 #include "ipa_installer.h"
-#include "multi_instance.h"
-#include "client_update_checker.h"
+#include "system/multi_instance.h"
+#include "system/client_update_checker.h"
 
 namespace ClientManager {
 

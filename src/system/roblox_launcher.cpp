@@ -18,8 +18,7 @@
 #include <regex>
 #endif
 
-#include "app_state.h"
-#include "../network/http.h"
+#include "network/http.h"
 #include "console/console.h"
 #include "utils/account_utils.h"
 #include "ui/widgets/notifications.h"

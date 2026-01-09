@@ -9,13 +9,13 @@
 #include <utility>
 #include <format>
 
-#include "../../ui.h"
+#include "ui/ui.h"
 #include "utils/account_utils.h"
 #include "utils/time_utils.h"
-#include "../accounts/accounts_join_ui.h"
-#include "../components.h"
+#include "ui/windows/accounts/accounts_join_ui.h"
+#include "ui/windows/components.h"
 #include "ui/widgets/context_menus.h"
-#include "../servers/servers_utils.h"
+#include "ui/windows/servers/servers_utils.h"
 #include "ui/widgets/bottom_right_status.h"
 #include "games.h"
 #include "games_utils.h"

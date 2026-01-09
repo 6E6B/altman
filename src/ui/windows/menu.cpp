@@ -16,7 +16,6 @@
 #include "ui/windows/backup/backup.h"
 #include "components.h"
 #include "console/console.h"
-#include "utils/app_state.h"
 #include "ui/widgets/bottom_right_status.h"
 #include "data.h"
 #include "network/roblox/common.h"

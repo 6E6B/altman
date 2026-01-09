@@ -8,7 +8,7 @@
 #include "imgui_impl_osx.h"
 #include "utils/stb_image.h"
 
-#include "../ui.h"
+#include "ui/ui.h"
 #include "components/data.h"
 #include "network/roblox/common.h"
 #include "network/roblox/auth.h"

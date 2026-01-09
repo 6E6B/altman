@@ -5,7 +5,7 @@
 #include <cpr/cpr.h>
 
 #include "ui/windows/components.h"
-#include "../http.h"
+#include "network/http.h"
 #include "common.h"
 #include "console/console.h"
 
