@@ -21,8 +21,8 @@
 #include <optional>
 #include <span>
 
-#include "core/base64.h"
-#include "core/app_state.h"
+#include "utils/base64.h"
+#include "utils/app_state.h"
 #include "console/console.h"
 
 std::vector<AccountData> g_accounts;

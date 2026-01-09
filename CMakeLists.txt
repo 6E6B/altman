@@ -66,7 +66,7 @@ file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS src/*.cpp src/*.mm src/*.h)
 if(APPLE)
     list(REMOVE_ITEM SRC_FILES
             ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/src/utils/ui/webview_windows.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/webview/webview_windows.cpp
     )
 endif()
 
@@ -76,11 +76,15 @@ add_executable(AltMan MACOSX_BUNDLE ${SRC_FILES})
 target_include_directories(AltMan PRIVATE
         src
         src/components
+        src/components/history
+        src/network
+        src/network/roblox
+        src/system
+        src/ui
+        src/ui/webview
+        src/ui/widgets
+        src/ui/windows
         src/utils
-        src/utils/core
-        src/utils/network
-        src/utils/system
-        src/utils/ui
         ${imgui_SOURCE_DIR}
         ${imgui_SOURCE_DIR}/backends
 )

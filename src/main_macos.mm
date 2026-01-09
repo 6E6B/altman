@@ -6,18 +6,22 @@
 #include "imgui.h"
 #include "imgui_impl_metal.h"
 #include "imgui_impl_osx.h"
-#include "stb_image.h"
+#include "utils/stb_image.h"
 
 #include "../ui.h"
 #include "components/data.h"
-#include "network/roblox.h"
-#include "ui/notifications.h"
-#include "ui/modal_popup.h"
-#include "system/main_thread.h"
+#include "network/roblox/common.h"
+#include "network/roblox/auth.h"
+#include "network/roblox/games.h"
+#include "network/roblox/session.h"
+#include "network/roblox/social.h"
+#include "ui/widgets/notifications.h"
+#include "ui/widgets/modal_popup.h"
+#include "utils/main_thread.h"
 #include "system/auto_updater.h"
 #include "system/client_update_checker.h"
 #include "console/console.h"
-#include "system/threading.h"
+#include "utils/threading.h"
 
 #include "assets/fonts/embedded_rubik.h"
 #include "assets/fonts/embedded_fa_solid.h"
@@ -195,6 +199,10 @@ bool LoadTextureFromFile(const char *file_name, void **out_texture, int *out_wid
     ImGui_ImplMetal_Shutdown();
     ImGui_ImplOSX_Shutdown();
     ImGui::DestroyContext();
+
+#if !__has_feature(objc_arc)
+    [super dealloc];
+#endif
 }
 
 - (void)loadView {
