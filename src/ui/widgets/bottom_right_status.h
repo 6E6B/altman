@@ -3,7 +3,7 @@
 #include <string>
 
 namespace Status {
-	void Set(const std::string& s);
-	void Error(const std::string& s);
+	void Set(std::string text);
+	void Error(std::string text);
 	std::string Get();
 }

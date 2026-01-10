@@ -4,58 +4,70 @@
 #include <mutex>
 #include <thread>
 #include <chrono>
+#include <format>
 
 namespace Status {
-	namespace {
-		std::mutex mtx;
-		std::string originalText = "Idle";
-		std::string displayText = "Idle";
-		std::chrono::steady_clock::time_point lastSetTime{};
-	}
+    namespace {
+        constexpr int COUNTDOWN_SECONDS = 5;
+        constexpr const char* IDLE_TEXT = "Idle";
 
-	void Set(const std::string& s) {
-		auto tp = std::chrono::steady_clock::now();
+        std::mutex g_mutex;
+        std::string g_originalText = IDLE_TEXT;
+        std::string g_displayText = IDLE_TEXT;
+        std::chrono::steady_clock::time_point g_lastSetTime{};
 
-		{
-			std::lock_guard<std::mutex> lock(mtx);
-			originalText = s;
-			displayText = originalText + " (5)";
-			lastSetTime = tp;
-		}
+        void UpdateDisplayText(std::string_view text, int secondsRemaining) {
+            if (secondsRemaining > 0) {
+                g_displayText = std::format("{} ({})", text, secondsRemaining);
+            } else {
+                g_displayText = IDLE_TEXT;
+                g_originalText = IDLE_TEXT;
+            }
+        }
 
-		std::thread([tp, s]() {
-			for (int i = 5; i >= 0; --i) {
-				{
-					std::lock_guard<std::mutex> lock(mtx);
-					if (lastSetTime != tp) {
-						return;
-					}
-				}
+        bool IsCurrentTimer(const std::chrono::steady_clock::time_point& timerStart) {
+            return g_lastSetTime == timerStart;
+        }
+    }
 
-				std::this_thread::sleep_for(std::chrono::seconds(1));
-				std::lock_guard<std::mutex> lock(mtx);
+    void Set(std::string text) {
+        const auto timerStart = std::chrono::steady_clock::now();
 
-				if (lastSetTime == tp) {
-					if (i > 0) {
-						displayText = s + " (" + std::to_string(i - 1) + ")";
-					} else {
-						displayText = "Idle";
-						originalText = "Idle";
-					}
-				} else {
-					return;
-				}
-			}
-		}).detach();
-	}
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            g_originalText = text;
+            g_displayText = std::format("{} ({})", text, COUNTDOWN_SECONDS);
+            g_lastSetTime = timerStart;
+        }
 
-	void Error(const std::string& s) {
-		Set(s);
-		ModalPopup::AddInfo(s);
-	}
+        std::thread([timerStart, text = std::move(text)]() {
+            for (int i = COUNTDOWN_SECONDS; i >= 0; --i) {
+                {
+                    std::lock_guard<std::mutex> lock(g_mutex);
+                    if (!IsCurrentTimer(timerStart)) {
+                        return;
+                    }
+                }
 
-	std::string Get() {
-		std::lock_guard<std::mutex> lock(mtx);
-		return displayText;
-	}
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+
+                std::lock_guard<std::mutex> lock(g_mutex);
+                if (IsCurrentTimer(timerStart)) {
+                    UpdateDisplayText(text, i - 1);
+                } else {
+                    return;
+                }
+            }
+        }).detach();
+    }
+
+    void Error(std::string text) {
+        Set(text);
+        ModalPopup::AddInfo(text);
+    }
+
+    std::string Get() {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        return g_displayText;
+    }
 }
