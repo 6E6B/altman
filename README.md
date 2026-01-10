@@ -53,7 +53,7 @@
 - **By JobID**: Enter the JobID in the Quick Join field.
 - **By PlaceID**: Use a valid PlaceID to connect to a server.
 - **By Username**: Connect directly to a user's session (if joins are enabled).
-- **Private Server Link** – Paste a private server share link to join instantly.
+- **By Private Server Link**: Use a private server share link to join instantly.
 
 > 💡 **Tip**: You can also join games through the **Servers** or **Games** tabs.
 
