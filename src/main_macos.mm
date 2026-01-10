@@ -55,7 +55,7 @@ void ReloadFonts(float dpiScale) {
     rubikCfg.FontDataOwnedByAtlas = false;
     g_rubikFont = io.Fonts->AddFontFromMemoryTTF(
         (void*)EmbeddedFonts::rubik_regular_ttf,
-        EmbeddedFonts::rubik_regular_ttf_len,
+        sizeof(EmbeddedFonts::rubik_regular_ttf),
         baseFontSize,
         &rubikCfg
     );
@@ -74,7 +74,7 @@ void ReloadFonts(float dpiScale) {
     //g_iconFont = io.Fonts->AddFontFromFileTTF("assets/fonts/fa-solid.ttf", iconFontSize, &iconCfg, fa_solid_ranges);*/
     g_iconFont = io.Fonts->AddFontFromMemoryTTF(
         (void*)EmbeddedFonts::fa_solid_ttf,
-        EmbeddedFonts::fa_solid_ttf_len,
+        sizeof(EmbeddedFonts::fa_solid_ttf),
         iconFontSize,
         &iconCfg,
         fa_solid_ranges
