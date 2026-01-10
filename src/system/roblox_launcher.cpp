@@ -110,7 +110,6 @@ std::optional<std::string> fetchAuthTicket(const std::string& cookie, const std:
 #ifdef _WIN32
 
 HANDLE startRoblox(uint64_t placeId, const std::string& jobId, const std::string& cookie) {
-    LOG_INFO("Fetching x-csrf token");
     auto csrfResponse = HttpClient::post(
         "https://auth.roblox.com/v1/authentication-ticket",
         {{"Cookie", ".ROBLOSECURITY=" + cookie}}
@@ -122,7 +121,6 @@ HANDLE startRoblox(uint64_t placeId, const std::string& jobId, const std::string
         return nullptr;
     }
 
-    LOG_INFO("Fetching authentication ticket");
     auto ticketResponse = HttpClient::post(
         "https://auth.roblox.com/v1/authentication-ticket",
         {
@@ -249,7 +247,6 @@ namespace {
 
         if (isShareLink) {
             std::string shareCode = match[1];
-            LOG_INFO("Resolving share link code: {}", shareCode);
 
             std::string apiUrl = "https://apis.roblox.com/sharelinks/v1/resolve-link";
             const std::string jsonBody = std::format(R"({{"linkId":"{}","linkType":"Server"}})", shareCode);
@@ -292,8 +289,6 @@ namespace {
                 placeId = invite["placeId"].get<uint64_t>();
                 linkCode = invite["linkCode"].get<std::string>();
 
-                LOG_INFO("Resolved placeId={} linkCode={}", placeId, linkCode);
-
             } catch (std::exception& e) {
                 LOG_ERROR("JSON parse error: {}", e.what());
                 return false;
@@ -303,7 +298,6 @@ namespace {
         if (isDirectLink) {
             placeId = std::stoull(match[1].str());
             linkCode = match[2].str();
-            LOG_INFO("Parsed direct-link placeId={} linkCode={}", placeId, linkCode);
         }
 
         std::string gameUrl = std::format("https://www.roblox.com/games/{}/?privateServerLinkCode={}", 
@@ -324,7 +318,6 @@ namespace {
         std::smatch accessMatch;
         if (std::regex_search(pageResponse.text, accessMatch, accessCodeRegex) && accessMatch.size() == 3) {
             accessCode = accessMatch[1].str();
-            LOG_INFO("Retrieved access code: {}", accessCode);
         } else {
             LOG_ERROR("This private server link is no longer valid.");
             return false;
@@ -361,7 +354,6 @@ namespace {
                 urls.mobile = std::format("placeId={}&accessCode={}&linkCode={}",
                     resolvedPlaceIdStr, accessCode, linkCode);
 
-                LOG_INFO("Launching private server for place {}", placeId);
                 break;
             }
 
@@ -549,17 +541,11 @@ bool copyClientToUserEnvironment(const std::string& username, const std::string&
         return false;
     }
 
-    LOG_INFO("Copying from {} to {}", sourcePath, destPath);
-
     if (!MultiInstance::needsClientUpdate(sourcePath, destPath)) {
-        LOG_INFO("Client already up to date: {}", clientName);
         return true;
     }
 
-    LOG_INFO("Copying client from {} to {}", sourcePath, destPath);
-
     if (std::filesystem::exists(destPath)) {
-        LOG_INFO("Removing old client copy...");
         std::filesystem::remove_all(destPath, ec);
         if (ec) {
             LOG_ERROR("Failed to remove old client: {}", ec.message());
@@ -575,7 +561,6 @@ bool copyClientToUserEnvironment(const std::string& username, const std::string&
         return false;
     }
 
-    LOG_INFO("Client copied successfully");
     MultiInstance::saveSourceHash(destPath);
     return true;
 }
@@ -584,9 +569,6 @@ bool createSandboxedRoblox(AccountData& acc, const std::string& protocolURL) {
     std::string baseClientName = acc.isUsingCustomClient && !acc.customClientBase.empty()
         ? acc.customClientBase
         : "Vanilla";
-
-    LOG_INFO("Creating sandboxed Roblox - base: {}, custom: {}, name: {}",
-        baseClientName, acc.isUsingCustomClient, acc.clientName);
 
     if (baseClientName == "Hydrogen" || baseClientName == "Delta") {
         auto keyIt = g_clientKeys.find(baseClientName);
@@ -613,8 +595,6 @@ bool createSandboxedRoblox(AccountData& acc, const std::string& protocolURL) {
         Data::SaveAccounts();
     }
 
-    LOG_INFO("Launching {} (base: {}) for user: {}", clientName, baseClientName, acc.username);
-
     if (!copyClientToUserEnvironment(acc.username, clientName)) {
         LOG_ERROR("Failed to copy client to user environment");
         return false;
@@ -631,15 +611,10 @@ bool createSandboxedRoblox(AccountData& acc, const std::string& protocolURL) {
         return false;
     }
 
-    std::filesystem::path keychainPath = std::filesystem::path(profilePath) / "Library" / "Keychains" / "login.keychain";
-    if (!std::filesystem::exists(keychainPath)) {
-        LOG_INFO("Creating keychain...");
-        MultiInstance::createKeychain(acc.username);
-    }
+	MultiInstance::createKeychain(acc.username);
     MultiInstance::unlockKeychain(acc.username);
 
     if (MultiInstance::needsBundleIdModification(acc.username, clientName, acc.username)) {
-        LOG_INFO("Modifying bundle ID for {}", clientName);
         if (!MultiInstance::modifyBundleIdentifier(acc.username, clientName, acc.username, true)) {
             LOG_ERROR("Failed to modify bundle identifier");
             return false;
@@ -658,19 +633,16 @@ bool createSandboxedRoblox(AccountData& acc, const std::string& protocolURL) {
         Data::SaveAccounts();
     }
 
-    LOG_INFO("Successfully launched sandboxed client");
     return true;
 }
 
 bool startRoblox(const LaunchParams& params, AccountData& acc) {
-    LOG_INFO("Fetching x-csrf token");
     auto csrfToken = fetchCsrfToken(acc.cookie);
     if (!csrfToken) {
         LOG_ERROR("Failed to get CSRF token");
         return false;
     }
 
-    LOG_INFO("Fetching authentication ticket");
     auto ticket = fetchAuthTicket(acc.cookie, *csrfToken);
     if (!ticket) {
         LOG_ERROR("Failed to get authentication ticket");
@@ -690,7 +662,6 @@ bool startRoblox(const LaunchParams& params, AccountData& acc) {
     const auto protocolCommand = buildProtocolCommand(isMobile, *ticket, timestamp,
                                                       launchUrl, browserTrackerId);
 
-    LOG_INFO("Using {} protocol for {} client", isMobile? "mobile" : "desktop", isMobile ? "Delta" : "standard");
 	if (acc.username.empty()) {
 		LOG_ERROR("Username is empty or invalid");
 		return false;
@@ -703,14 +674,11 @@ bool startRoblox(const LaunchParams& params, AccountData& acc) {
 		Data::SaveAccounts();
 	}
 
-	LOG_INFO("Launching sandboxed {} client for {}", clientName, acc.username);
-
 	if (!createSandboxedRoblox(acc, protocolCommand)) {
 		LOG_ERROR("Failed to create sandboxed client instance");
 		return false;
 	}
 
-	LOG_INFO("Client launched successfully");
 	usleep(500000);
 
 	return true;

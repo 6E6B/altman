@@ -383,7 +383,6 @@ namespace MultiInstance {
             std::ofstream hashOut(hashFile);
             hashOut << std::hex << hash;
 
-            LOG_INFO("Saved source hash: {:016x}", hash);
         } catch (const std::exception& e) {
             LOG_ERROR("Error saving source hash: {}", e.what());
         }
@@ -391,7 +390,6 @@ namespace MultiInstance {
 
     bool needsClientUpdate(const std::string& sourcePath, const std::string& destPath) {
         if (!std::filesystem::exists(destPath)) {
-            LOG_INFO("Destination does not exist, needs update");
             return true;
         }
 
@@ -405,34 +403,25 @@ namespace MultiInstance {
 
             auto destExecOpt = findMainExecutable(destPath);
             if (!destExecOpt) {
-                LOG_INFO("Destination executable does not exist, needs update");
                 return true;
             }
 
             std::filesystem::path hashFile = std::filesystem::path(destPath).string() + ".hash";
 
             uint64_t sourceHash = computeCodeHash(sourceExec);
-            LOG_INFO("Source hash: {:016x}", sourceHash);
 
             if (std::filesystem::exists(hashFile)) {
                 std::ifstream hashIn(hashFile);
                 uint64_t storedHash;
                 hashIn >> std::hex >> storedHash;
 
-                LOG_INFO("Stored hash: {:016x}", storedHash);
-
                 if (sourceHash == storedHash) {
-                    LOG_INFO("Source matches stored hash, destination is up to date");
                     return false;
                 } else {
-                    LOG_INFO("Source differs from stored hash, needs update");
                     return true;
                 }
             }
-
-            LOG_INFO("No stored hash found, needs update");
             return true;
-
         } catch (const std::exception& e) {
             LOG_ERROR("Error checking client update: {}", e.what());
             return false;
@@ -446,11 +435,8 @@ namespace MultiInstance {
         std::filesystem::path userEnvPath = std::filesystem::path(appDataDir) / "environments" / username;
 
         if (!std::filesystem::exists(userEnvPath)) {
-            LOG_INFO("User environment doesn't exist: {}", username);
             return true;
         }
-
-        LOG_INFO("Cleaning up environment for user: {}", username);
 
         std::error_code ec;
         std::filesystem::remove_all(userEnvPath, ec);
@@ -460,7 +446,6 @@ namespace MultiInstance {
             return false;
         }
 
-        LOG_INFO("User environment cleaned up successfully");
         return true;
     }
 
@@ -546,42 +531,48 @@ namespace MultiInstance {
         return std::format("{}/clients/{}.app", appDataDir, baseClientName);
     }
 
-    bool createKeychain(const std::string& profileId) {
-        std::string appDataDir = getAppDataDirectory();
-        if (appDataDir.empty()) return false;
+	bool createKeychain(const std::string& profileId) {
+    	std::string appDataDir = getAppDataDirectory();
+    	if (appDataDir.empty())
+    		return false;
 
-        auto profileDir = std::filesystem::path(appDataDir) / "environments" / profileId;
+    	auto profileDir = std::filesystem::path(appDataDir) / "environments" / profileId;
 
-        std::error_code ec;
-        std::filesystem::create_directories(profileDir, ec);
-        if (ec) {
-            LOG_ERROR("Failed to create profile directory: {}", ec.message());
-            return false;
-        }
+    	auto keychainDir = profileDir / "Library" / "Keychains";
+    	std::error_code ec;
+    	std::filesystem::create_directories(keychainDir, ec);
 
-        LOG_INFO("Creating keychain for profile: {}", profileId);
+    	auto keychainPath = keychainDir / "login.keychain-db";
 
-        return spawnWithEnv("/usr/bin/security",
-            {"security", "create-keychain", "-p", "", "login.keychain", nullptr},
-            profileDir.string());
+    	if (std::filesystem::exists(keychainPath)) {
+    		return true;
+    	}
+
+    	return spawnWithEnv("/usr/bin/security",
+			{"security", "create-keychain", "-p", "", keychainPath.string().c_str(), nullptr},
+			profileDir.string()
+		);
     }
 
-    bool unlockKeychain(const std::string& profileId) {
-        std::string appDataDir = getAppDataDirectory();
-        if (appDataDir.empty()) return false;
+	bool unlockKeychain(const std::string& profileId) {
+    	std::string appDataDir = getAppDataDirectory();
+    	if (appDataDir.empty())
+    		return false;
 
-        auto profileDir = std::filesystem::path(appDataDir) / "environments" / profileId;
+    	auto profileDir = std::filesystem::path(appDataDir) / "environments" / profileId;
 
-        if (!std::filesystem::exists(profileDir)) {
-            LOG_ERROR("Profile directory does not exist: {}", profileDir.string());
-            return false;
-        }
+    	auto keychainPath = profileDir / "Library" / "Keychains" / "login.keychain-db";
 
-        LOG_INFO("Unlocking keychain for profile: {}", profileId);
+    	if (!std::filesystem::exists(keychainPath)) {
+    		LOG_INFO("Keychain does not exist: {}", keychainPath.string());
+    		return false;
+    	}
 
-        return spawnWithEnv("/usr/bin/security",
-            {"security", "unlock-keychain", "-p", "", "login.keychain", nullptr},
-            profileDir.string());
+    	return spawnWithEnv(
+			"/usr/bin/security",
+			{"security", "unlock-keychain", "-p", "", keychainPath.string().c_str(), nullptr},
+			profileDir.string()
+		);
     }
 
     bool createProfileEnvironment(const std::string& profileId, std::string& profilePath) {
@@ -623,7 +614,6 @@ namespace MultiInstance {
         }
 
         profilePath = environmentsDir.string();
-        LOG_INFO("Profile environment created: {}", profilePath);
         return true;
     }
 
@@ -637,16 +627,11 @@ namespace MultiInstance {
             return false;
         }
 
-        LOG_INFO("Modifying bundle identifier for client: {}", clientName);
-        LOG_INFO("Profile ID: {}", profileId);
-
         std::string plistPath = std::format("{}/Contents/Info.plist", clientPath);
         if (!std::filesystem::exists(plistPath)) {
             LOG_ERROR("Info.plist not found");
             return false;
         }
-
-        LOG_INFO("Using plist at: {}", plistPath);
 
         std::ifstream plistIn(plistPath);
         if (!plistIn) {
@@ -688,7 +673,6 @@ namespace MultiInstance {
             return false;
         }
 
-        LOG_INFO("Codesigning completed successfully");
         return true;
     }
 
@@ -755,7 +739,6 @@ namespace MultiInstance {
 				std::istreambuf_iterator<char>());
         		existingKeyFile.close();
         		if (existingKey == key) {
-        			LOG_INFO("Key already up to date for {}", clientName);
         			return true;
         		}
         	}
@@ -769,8 +752,6 @@ namespace MultiInstance {
 
     keyFile << key;
     keyFile.close();
-
-    LOG_INFO("Key written successfully for {}", clientName);
     return true;
 }
 
@@ -785,14 +766,7 @@ bool launchSandboxedClient(const std::string& username,
         return false;
     }
 
-    LOG_INFO("playerPath: {}", clientPath);
-    LOG_INFO("protocolURL: {}", protocolURL);
-    LOG_INFO("Launching sandboxed client: {}", clientName);
-    LOG_INFO("Profile: {}", profileId);
-    LOG_INFO("Profile path: {}", profilePath);
-
     bool mobileClient = isMobileClient2(clientPath);
-    LOG_INFO("mobileClient: {}", mobileClient);
 
     std::string logDir = std::format("{}/Logs", profilePath);
     std::error_code ec;
@@ -812,10 +786,6 @@ bool launchSandboxedClient(const std::string& username,
         opts.env["XDG_DATA_HOME"] = profilePath + "/Documents";
     }
 
-    for (const auto& [key, value] : opts.env) {
-        LOG_INFO("{} = {}", key, value);
-    }
-
     opts.stdoutPath = std::format("{}/roblox_stdout.log", logDir);
     opts.stderrPath = std::format("{}/roblox_stderr.log", logDir);
     opts.waitForCompletion = false;
@@ -827,7 +797,6 @@ bool launchSandboxedClient(const std::string& username,
         return false;
     }
 
-    LOG_INFO("Client launched successfully");
     return true;
 }
 

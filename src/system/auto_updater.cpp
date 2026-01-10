@@ -525,8 +525,7 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo& info, bool autoInst
             const auto patchPath = std::filesystem::temp_directory_path() / "altman_update.patch";
 
             const auto progressCallback = [](int percentage, size_t speed, size_t total) {
-                LOG_INFO("Download progress: {}% - {} - {}",
-                    percentage, AutoUpdater::FormatSpeed(speed), AutoUpdater::FormatBytes(total));
+                // LOG_INFO("Download progress: {}% - {} - {}", percentage, AutoUpdater::FormatSpeed(speed), AutoUpdater::FormatBytes(total));
             };
 
             success = DownloadFileWithResume(info.deltaUrl, patchPath, progressCallback);
@@ -553,8 +552,7 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo& info, bool autoInst
 
         if (!useDelta) {
             const auto progressCallback = [](int percentage, size_t speed, size_t total) {
-                LOG_INFO("Download progress: {}% - {} - {}",
-                    percentage, AutoUpdater::FormatSpeed(speed), AutoUpdater::FormatBytes(total));
+                // LOG_INFO("Download progress: {}% - {} - {}", percentage, AutoUpdater::FormatSpeed(speed), AutoUpdater::FormatBytes(total));
             };
 
             success = DownloadFileWithResume(info.downloadUrl, tempPath, progressCallback);
