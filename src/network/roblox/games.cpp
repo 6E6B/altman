@@ -55,7 +55,7 @@ GameDetail getGameDetail(uint64_t universeId) {
             }
         }
     } catch (const std::exception& e) {
-        LOG_ERROR(std::string("Failed to parse game detail: ") + e.what());
+        LOG_ERROR("Failed to parse game detail: {}", e.what());
     }
 
     return d;
@@ -69,7 +69,7 @@ ServerPage getPublicServersPage(uint64_t placeId, const std::string& cursor) {
 
     HttpClient::Response resp = HttpClient::get(url);
     if (resp.status_code < 200 || resp.status_code >= 300) {
-        LOG_ERROR("Failed to fetch servers: HTTP " + std::to_string(resp.status_code));
+        LOG_ERROR("Failed to fetch servers: HTTP {}", resp.status_code);
         return ServerPage{};
     }
 
@@ -116,7 +116,7 @@ std::vector<GameInfo> searchGames(const std::string& query) {
 
     std::vector<GameInfo> out;
     if (resp.status_code < 200 || resp.status_code >= 300) {
-        LOG_ERROR("Game search failed: HTTP " + std::to_string(resp.status_code));
+        LOG_ERROR("Game search failed: HTTP {}", resp.status_code);
         return out;
     }
 
@@ -164,8 +164,7 @@ GamePrivateServersPage getPrivateServersForGame(uint64_t placeId, const std::str
     );
 
     if (resp.status_code < 200 || resp.status_code >= 300) {
-        LOG_ERROR("Failed to fetch private servers: HTTP " +
-                  std::to_string(resp.status_code));
+        LOG_ERROR("Failed to fetch private servers: HTTP {}", resp.status_code);
         return {};
     }
 
@@ -224,11 +223,12 @@ GamePrivateServersPage getPrivateServersForGame(uint64_t placeId, const std::str
     return page;
 }
 
-MyPrivateServersPage getAllPrivateServers(int serverTab, const std::string& cookie) {
+MyPrivateServersPage getAllPrivateServers(int serverTab, const std::string& cookie, const std::string& cursor) {
     std::string url = std::format(
         "https://games.roblox.com/v1/private-servers/my-private-servers"
-        "?privateServersTab={}&itemsPerPage=100",
-        serverTab
+        "?privateServersTab={}&itemsPerPage=100{}",
+        serverTab,
+        cursor.empty() ? "" : "&cursor=" + cursor
     );
 
     auto resp = HttpClient::get(
@@ -240,8 +240,7 @@ MyPrivateServersPage getAllPrivateServers(int serverTab, const std::string& cook
     );
 
     if (resp.status_code < 200 || resp.status_code >= 300) {
-        LOG_ERROR("Failed to fetch private servers: HTTP " +
-                  std::to_string(resp.status_code));
+        LOG_ERROR("Failed to fetch private servers: HTTP {}", resp.status_code);
         return {};
     }
 

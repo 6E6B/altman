@@ -448,16 +448,17 @@ namespace {
 		bool isLoading = false;
 		std::string errorMessage;
 		std::optional<std::string> nextPageCursor;
-		std::optional<std::string> prevPageCursor;
+		std::string currentCursor;
+		std::vector<std::string> cursorHistory;
 
 	public:
-		void loadServers(int tabType, const AccountData& account) {
+		void loadServers(int tabType, const AccountData& account, const std::string& cursor = {}) {
 			isLoading = true;
 			errorMessage.clear();
 
-			ThreadTask::fireAndForget([this, tabType, cookie = account.cookie]() {
+			ThreadTask::fireAndForget([this, tabType, cookie = account.cookie, cursor]() {
 				try {
-					auto page = Roblox::getAllPrivateServers(tabType, cookie);
+					auto page = Roblox::getAllPrivateServers(tabType, cookie, cursor);
 
 					servers.clear();
 					for (const auto& info : page.data) {
@@ -479,7 +480,7 @@ namespace {
 						server.fps = 0.0f;
 						server.ping = 0.0;
 
-						/*auto page2 = Roblox::getPrivateServersForGame(server.placeId, cookie);
+						auto page2 = Roblox::getPrivateServersForGame(server.placeId, cookie);
 						for (const auto& gameServer : page2.data) {
 							if (gameServer.vipServerId == server.vipServerId) {
 								server.playing = gameServer.playing;
@@ -489,13 +490,13 @@ namespace {
 								server.maxPlayers = gameServer.maxPlayers;
 								break;
 							}
-						}*/
+						}
 
 						servers.push_back(std::move(server));
 					}
 
 					nextPageCursor = page.nextCursor;
-					prevPageCursor = page.prevCursor;
+					currentCursor = cursor;
 
 					LOG_INFO("Loaded {} private servers", servers.size());
 				}
@@ -505,7 +506,7 @@ namespace {
 				}
 
 				isLoading = false;
-				});
+			});
 		}
 
 		void joinServer(const PrivateServer& server, const std::string& cookie) {
@@ -567,6 +568,8 @@ namespace {
 				if (ImGui::BeginTabItem("Joinable Servers")) {
 					if (selectedTab != 1) {
 						selectedTab = 1;
+						currentCursor.clear();
+						cursorHistory.clear();
 						loadServers(1, account);
 					}
 					ImGui::EndTabItem();
@@ -575,6 +578,8 @@ namespace {
 				if (ImGui::BeginTabItem("My Servers")) {
 					if (selectedTab != 0) {
 						selectedTab = 0;
+						currentCursor.clear();
+						cursorHistory.clear();
 						loadServers(0, account);
 					}
 					ImGui::EndTabItem();
@@ -598,20 +603,29 @@ namespace {
 
 			ImGui::SameLine(0, style.ItemSpacing.x);
 			if (ImGui::Button("Refresh", ImVec2(refreshWidth, 0))) {
+				currentCursor.clear();
+				cursorHistory.clear();
 				loadServers(selectedTab, account);
 			}
 
 			ImGui::SameLine(0, style.ItemSpacing.x);
-			ImGui::BeginDisabled(!prevPageCursor.has_value() || isLoading);
+			ImGui::BeginDisabled(cursorHistory.empty() || isLoading);
 			if (ImGui::Button("\xEF\x81\x93 Prev", ImVec2(prevWidth, 0))) {
-				// TODO: Implement pagination with cursor
+				if (!cursorHistory.empty()) {
+					std::string previousCursor = cursorHistory.back();
+					cursorHistory.pop_back();
+					loadServers(selectedTab, account, previousCursor);
+				}
 			}
 			ImGui::EndDisabled();
 
 			ImGui::SameLine(0, style.ItemSpacing.x);
 			ImGui::BeginDisabled(!nextPageCursor.has_value() || isLoading);
 			if (ImGui::Button("Next \xEF\x81\x94", ImVec2(nextWidth, 0))) {
-				// TODO: Implement pagination with cursor
+				if (nextPageCursor.has_value()) {
+					cursorHistory.push_back(currentCursor);
+					loadServers(selectedTab, account, nextPageCursor.value());
+				}
 			}
 			ImGui::EndDisabled();
 
@@ -640,7 +654,7 @@ namespace {
 						game.find(filterLower) == std::string::npos &&
 						owner.find(filterLower) == std::string::npos) {
 						continue;
-					}
+						}
 				}
 				displayList.push_back(server);
 			}

@@ -96,6 +96,6 @@ std::vector<GameInfo> searchGames(const std::string& query);
 
 GamePrivateServersPage getPrivateServersForGame(uint64_t placeId, const std::string& cookie);
 
-MyPrivateServersPage getAllPrivateServers(int serverTab, const std::string& cookie);
+MyPrivateServersPage getAllPrivateServers(int serverTab, const std::string& cookie, const std::string& cursor = {});
 
 }
