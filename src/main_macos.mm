@@ -220,7 +220,7 @@ bool LoadTextureFromFile(const char *file_name, void **out_texture, int *out_wid
 }
 
 - (void)drawInMTKView:(MTKView *)view {
-    ThreadTask::RunOnMainProcess();
+    ThreadTask::RunOnMainUpdate();
 
     ImGuiIO &io = ImGui::GetIO();
     io.DisplaySize.x = view.bounds.size.width;

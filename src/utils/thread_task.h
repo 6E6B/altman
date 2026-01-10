@@ -16,8 +16,9 @@ namespace ThreadTask {
 		tasks.push_back(std::move(t));
 	}
 
-	inline void RunOnMainProcess() {
-		std::deque<Task> toRun; {
+	inline void RunOnMainUpdate() {
+		std::deque<Task> toRun;
+		{
 			std::lock_guard<std::mutex> lock(mtx);
 			toRun.swap(tasks);
 		}

@@ -390,6 +390,7 @@ namespace Data {
             g_checkUpdatesOnStartup = safeGet(j, "checkUpdatesOnStartup", true);
             g_killRobloxOnLaunch = safeGet(j, "killRobloxOnLaunch", false);
             g_clearCacheOnLaunch = safeGet(j, "clearCacheOnLaunch", false);
+        	g_multiRobloxEnabled = safeGet(j, "multiRobloxEnabled", false);
 
             if (j.contains("clientKeys") && j["clientKeys"].is_object()) {
                 g_clientKeys.clear();
@@ -415,6 +416,7 @@ namespace Data {
             {"checkUpdatesOnStartup", g_checkUpdatesOnStartup},
             {"killRobloxOnLaunch", g_killRobloxOnLaunch},
             {"clearCacheOnLaunch", g_clearCacheOnLaunch},
+        	{"multiRobloxEnabled", g_multiRobloxEnabled},
             {"clientKeys", g_clientKeys}
         };
 
