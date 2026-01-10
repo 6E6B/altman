@@ -282,13 +282,12 @@ bool CleanupRobloxApp(const std::string& clientsDir, ProgressCallback progressCb
     return true;
 }
 
-// TODO(roulette): recompile binary to be universal
-// NOTE: NOT A UNIVERSAL BINARY. WILL CAUSE PROBLEMS
 bool DownloadInsertDylib(const std::string& outputPath, ProgressCallback progressCb) {
+	// NOTE: This insert_dylib binary is not universal and will cause problems
     const std::string url = "https://github.com/DollarNoob/Macsploit-Mirror/raw/main/insert_dylib";
 
     LOG_INFO("Downloading insert_dylib");
-
+#ifdef DISABLED_UNTIL_UPDATE_TO_UNIVERSAL
     auto progress_adapter = [progressCb](size_t downloaded, size_t total) {
         if (progressCb && total > 0) {
             const float percent = static_cast<float>(downloaded) / static_cast<float>(total);
@@ -299,6 +298,18 @@ bool DownloadInsertDylib(const std::string& outputPath, ProgressCallback progres
     if (!HttpClient::download(url, outputPath, {}, progress_adapter)) {
         return false;
     }
+#else
+	// Embedded binary is universal
+	static const char insert_dylib_bin[] = {
+		#embed "../assets/binaries/insert_dylib"
+	};
+
+	std::ofstream insert_dylib_file(outputPath, std::ios::binary);
+	if (!insert_dylib_file) {
+		throw std::runtime_error("Failed to open output file");
+	}
+	insert_dylib_file.write(reinterpret_cast<const char*>(insert_dylib_bin), sizeof(insert_dylib_bin));
+#endif
 
     const std::string command = std::format("chmod +x \"{}\"", outputPath);
     std::string output;
