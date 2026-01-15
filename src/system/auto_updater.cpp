@@ -406,7 +406,7 @@ void AutoUpdater::CheckForUpdates(bool silent) {
     ThreadTask::fireAndForget([silent]() {
         const auto endpoint = GetReleaseEndpoint(config.channel);
         const auto resp = HttpClient::get(endpoint, {
-            {"User-Agent", "AltMan"},
+            {"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"},
             {"Accept", "application/vnd.github+json"}
         });
 
@@ -627,7 +627,7 @@ bool AutoUpdater::DownloadFileWithResume(std::string_view url, const std::filesy
     }
 
     std::vector<std::pair<std::string, std::string>> headers = {
-       {"User-Agent", "AltMan"}
+       {"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"}
     };
 
     if (startOffset > 0) {

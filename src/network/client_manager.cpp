@@ -78,7 +78,7 @@ std::string GetLatestRobloxVersion() {
 
     const auto response = HttpClient::get(
         url,
-        {{"User-Agent", "RobloxAccountManager/1.0"}},
+        {{"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"}},
         {}, true, 10
     );
 
@@ -109,7 +109,7 @@ MacsploitVersion GetMacsploitVersion() {
 
     const auto response = HttpClient::get(
         url,
-        {{"User-Agent", "RobloxAccountManager/1.0"}},
+        {{"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"}},
         {}, true, 10
     );
 
@@ -139,7 +139,7 @@ HydrogenVersion GetHydrogenVersion() {
 
     const auto response = HttpClient::get(
         url,
-        {{"User-Agent", "RobloxAccountManager/1.0"}},
+        {{"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"}},
         {}, true, 10
     );
 
@@ -184,7 +184,7 @@ std::string GetDeltaVersion() {
 
     const auto response = HttpClient::get(
         url,
-        {{"User-Agent", "RobloxAccountManager/1.0"}},
+        {{"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"}},
         {}, true, 10
     );
 
@@ -231,7 +231,7 @@ bool DownloadRoblox(const std::string& version, const std::string& outputPath,
     return HttpClient::download(
         url,
         outputPath,
-        {{"User-Agent", "RobloxAccountManager/1.0"}},
+        {{"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"}},
         progress_adapter
     );
 }
