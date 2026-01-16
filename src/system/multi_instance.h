@@ -28,6 +28,13 @@ namespace MultiInstance {
         time_t launchTime;
     };
 
+	struct PatchTarget {
+		std::string patchName;
+		std::string patternStr;
+		std::vector<uint8_t> patchBytes;
+		uint32_t offset{0};
+	};
+
     // Semaphore management
     void Enable();
     void Disable();

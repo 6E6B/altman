@@ -833,5 +833,121 @@ bool stopSandboxedRoblox(pid_t pid) {
     return false;
 }
 
+void parsePattern(const std::string& patternStr, std::vector<uint8_t>& patternBytes, std::vector<uint8_t>& mask) {
+    std::stringstream ss(patternStr);
+    std::string byteStr;
+
+    while (ss >> byteStr) {
+    	if (byteStr == "?") {
+    		patternBytes.push_back(0x00);
+    		mask.push_back(0x00);
+    	} else {
+    		patternBytes.push_back(static_cast<uint8_t>(std::stoul(byteStr, nullptr, 16)));
+    		mask.push_back(0xFF);
+    	}
+    }
+}
+
+bool comparePattern(const uint8_t* data, const std::vector<uint8_t>& pattern, const std::vector<uint8_t>& mask) {
+    for (size_t i = 0; i < pattern.size(); ++i) {
+    	if ((data[i] & mask[i]) != pattern[i]) {
+    		return false;
+    	}
+    }
+    return true;
+}
+
+bool patchRobloxBinary(const std::string& appPath) {
+    std::string binaryPath = appPath + "/Contents/MacOS/RobloxPlayer";
+
+    std::vector<PatchTarget> targets = {
+        {
+        	"RobloxTerminationRoutine -> CBZ check",
+            "F3 03 00 AA F3 03 00 F9 ? ? 02 ? ? ? ? 91 ? ? ? ?",
+            {0x07, 0x00, 0x00, 0x14},
+            0x18
+        },
+        {
+        	"RobloxTerminationRoutine -> _objc_msgSend$terminate_",
+            "00 01 40 F9 02 00 80 D2 FD 7B 42 A9 F4 4F 41 A9 FF C3 00 91",
+            {0x1F, 0x20, 0x03, 0xD5},
+            0x14
+        },
+        {
+        	"signalShutdownSemaphore -> sem_post",
+            "? ? ? 91 ? ? ? ? ? ? 02 ? 1F 61 30 39 ? ? ? F9 FD 7B 42 A9 F4 4F 41 A9",
+            {0x1F, 0x20, 0x03, 0xD5},
+            0x24
+        }
+    };
+
+    std::ifstream binaryFile(binaryPath, std::ios::binary | std::ios::ate);
+    if (!binaryFile.is_open()) {
+        LOG_ERROR("Failed to open RobloxPlayer binary");
+        return false;
+    }
+
+    std::streamsize size = binaryFile.tellg();
+    std::vector<uint8_t> data(size);
+    binaryFile.seekg(0, std::ios::beg);
+    binaryFile.read(reinterpret_cast<char*>(data.data()), size);
+    binaryFile.close();
+
+    int totalPatchesApplied = 0;
+
+    for (size_t targetIndex = 0; targetIndex < targets.size(); targetIndex++) {
+        PatchTarget& target = targets[targetIndex];
+
+        std::vector<uint8_t> patternBytes;
+        std::vector<uint8_t> mask;
+        parsePattern(target.patternStr, patternBytes, mask);
+
+        size_t patchAddress = std::string::npos;
+
+        if (data.size() >= patternBytes.size()) {
+            for (size_t i = 0; i <= data.size() - patternBytes.size(); ++i) {
+                if (comparePattern(&data[i], patternBytes, mask)) {
+                    patchAddress = i;
+                    break;
+                }
+            }
+        }
+
+        patchAddress += target.offset;
+
+        if (patchAddress == std::string::npos) {
+            LOG_INFO("Target {}: Pattern not found. Skipping.", targetIndex + 1);
+            continue;
+        }
+
+        if (std::memcmp(&data[patchAddress], target.patchBytes.data(), target.patchBytes.size()) == 0) {
+            LOG_INFO("Target {}: Already patched. Skipping.", targetIndex + 1);
+            continue;
+        }
+
+        std::memcpy(&data[patchAddress], target.patchBytes.data(), target.patchBytes.size());
+        totalPatchesApplied++;
+        LOG_INFO("Target {}: Successfully patched instruction at 0x{:x}",
+                  targetIndex + 1, patchAddress);
+    }
+
+    if (totalPatchesApplied == 0) {
+        LOG_INFO("Patches already applied or no patterns found.");
+        return true;
+    }
+
+    std::ofstream output(binaryPath, std::ios::binary);
+    if (!output.is_open()) {
+        LOG_ERROR("Failed to open binary for writing.");
+        return false;
+    }
+
+    output.write(reinterpret_cast<const char*>(data.data()), data.size());
+    output.close();
+
+    LOG_INFO("Binary successfully processed. Total patches applied: {}", totalPatchesApplied);
+    return true;
+}
+
 }
 #endif
