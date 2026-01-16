@@ -186,12 +186,12 @@ void UpdateChecker::CheckerLoop() {
     LOG_INFO("Client update checker started");
 
     while (!shouldStop) {
-        std::vector<std::string> clientsToCheck = {"Vanilla", "MacSploit", "Hydrogen", "Delta"};
+        std::vector<std::string> clientsToCheck = {"Default", "MacSploit", "Hydrogen", "Delta"};
         
         for (const auto& clientName : clientsToCheck) {
             if (shouldStop) break;
 
-            if (clientName != "Vanilla" && !MultiInstance::isBaseClientInstalled(clientName)) {
+            if (clientName != "Default" && !MultiInstance::isBaseClientInstalled(clientName)) {
                 continue;
             }
 
@@ -224,27 +224,27 @@ void UpdateChecker::Initialize() {
 
     LoadVersionInfo();
 
-	if (!MultiInstance::isBaseClientInstalled("Vanilla")) {
-		LOG_INFO("Vanilla client not installed, downloading automatically...");
+	if (!MultiInstance::isBaseClientInstalled("Default")) {
+		LOG_INFO("Default client not installed, downloading automatically...");
 
 		auto progressCallback = [](float progress, const std::string& msg) {
-			// LOG_INFO("Vanilla download progress: {:.0f}% - {}", progress * 100.0f, msg);
+			// LOG_INFO("Default download progress: {:.0f}% - {}", progress * 100.0f, msg);
 		};
 
 		auto completionCallback = [](bool success, const std::string& message) {
 			if (success) {
-				LOG_INFO("Vanilla client installed successfully");
-				MarkClientAsInstalled("Vanilla", GetClientVersion("Vanilla"));
+				LOG_INFO("Default client installed successfully");
+				MarkClientAsInstalled("Default", GetClientVersion("Default"));
 			} else {
-				LOG_ERROR("Vanilla client installation failed: {}", message);
+				LOG_ERROR("Default client installation failed: {}", message);
 				ThreadTask::RunOnMain([message]() {
 					UpdateNotification::Show("Installation Failed",
-						std::format("Failed to install Vanilla client: {}", message), 5.0f);
+						std::format("Failed to install Default client: {}", message), 5.0f);
 				});
 			}
 		};
 
-		ClientManager::InstallClientAsync("Vanilla", progressCallback, completionCallback);
+		ClientManager::InstallClientAsync("Default", progressCallback, completionCallback);
 	}
     
     shouldStop = false;
@@ -275,9 +275,9 @@ void UpdateChecker::CheckNow(const std::string& clientName) {
 
 void UpdateChecker::CheckAllNow() {
     ThreadTask::fireAndForget([]() {
-        std::vector<std::string> clients = {"Vanilla", "MacSploit", "Hydrogen", "Delta"};
+        std::vector<std::string> clients = {"Default", "MacSploit", "Hydrogen", "Delta"};
         for (const auto& clientName : clients) {
-            if (clientName != "Vanilla" && !MultiInstance::isBaseClientInstalled(clientName)) {
+            if (clientName != "Default" && !MultiInstance::isBaseClientInstalled(clientName)) {
                 continue;
             }
             CheckClientForUpdate(clientName);
@@ -296,7 +296,7 @@ std::string UpdateChecker::GetClientVersion(const std::string& clientName) {
             return version.macos.exploit_version.value_or("");
         } else if (clientName == "Delta") {
             return ClientManager::GetDeltaVersion();
-        } else if (clientName == "Vanilla") {
+        } else if (clientName == "Default") {
             return ClientManager::GetLatestRobloxVersion();
         }
     } catch (const std::exception& e) {

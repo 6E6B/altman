@@ -658,7 +658,7 @@ void InstallClientAsync(const std::string& clientName,
 		const std::filesystem::path executableDir = robloxPlayerPath / "Contents" / "MacOS";
 		const std::filesystem::path binaryPath = executableDir / "RobloxPlayer";
 
-		if (clientName != "Vanilla") {
+		if (clientName != "Default") {
 			const std::filesystem::path insertDylibPath = std::filesystem::path(appDataDir) / "insert_dylib";
 
 			if (!std::filesystem::exists(insertDylibPath)) {

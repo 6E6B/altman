@@ -506,10 +506,10 @@ namespace MultiInstance {
 
     	if (refresh || cached.empty()) {
     		cached.clear();
-    		cached.push_back("Vanilla");
+    		cached.push_back("Default");
 
     		for (const auto& c : getAvailableClients(refresh)) {
-    			if (c != "Vanilla") {
+    			if (c != "Default") {
     				cached.push_back(c);
     			}
     		}
@@ -528,7 +528,7 @@ namespace MultiInstance {
 
         std::string baseClientName = clientName;
         if (clientName.find("Roblox_") == 0) {
-            baseClientName = "Vanilla";
+            baseClientName = "Default";
         }
 
         return std::format("{}/clients/{}.app", appDataDir, baseClientName);

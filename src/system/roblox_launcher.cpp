@@ -509,7 +509,7 @@ bool patchRobloxBinary(const std::string& appPath) {
 }
 
 bool copyClientToUserEnvironment(const std::string& username, const std::string& clientName) {
-    std::string baseClientName = "Vanilla";
+    std::string baseClientName = "Default";
 
     for (const auto& acc : g_accounts) {
         if (acc.username == username) {
@@ -569,7 +569,7 @@ bool copyClientToUserEnvironment(const std::string& username, const std::string&
 bool createSandboxedRoblox(AccountData& acc, const std::string& protocolURL) {
     std::string baseClientName = acc.isUsingCustomClient && !acc.customClientBase.empty()
         ? acc.customClientBase
-        : "Vanilla";
+        : "Default";
 
     if (baseClientName == "Hydrogen" || baseClientName == "Delta") {
         auto keyIt = g_clientKeys.find(baseClientName);

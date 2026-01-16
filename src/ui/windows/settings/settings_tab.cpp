@@ -21,7 +21,7 @@
 static bool g_requestOpenConsoleModal = false;
 
 static constexpr std::array<std::string_view, 4> g_availableClientsNames = {
-    "Vanilla",
+    "Default",
     "MacSploit",
     "Hydrogen",
     "Delta"
@@ -109,7 +109,7 @@ namespace {
 			if (!acc)
 				continue;
 
-			std::string currentBase = acc->customClientBase.empty() ? "Vanilla" : acc->customClientBase;
+			std::string currentBase = acc->customClientBase.empty() ? "Default" : acc->customClientBase;
 
 			ImGui::PushID(acc->id);
 
@@ -121,14 +121,14 @@ namespace {
 				for (const auto& clientName : availableClientsForUI) {
 					const bool isInstalled = MultiInstance::isBaseClientInstalled(clientName);
 
-					if (!isInstalled && clientName != "Vanilla") {
+					if (!isInstalled && clientName != "Default") {
 						ImGui::BeginDisabled();
 					}
 
 					bool isSelected = (currentBase == clientName);
 
 					if (ImGui::Selectable(clientName.c_str(), isSelected)) {
-						acc->customClientBase = (clientName == "Vanilla") ? "" : clientName;
+						acc->customClientBase = (clientName == "Default") ? "" : clientName;
 						Data::SaveAccounts();
 						LOG_INFO("Set {} to use base client: {}", acc->username, clientName);
 					}
@@ -137,7 +137,7 @@ namespace {
 						ImGui::SetItemDefaultFocus();
 					}
 
-					if (!isInstalled && clientName != "Vanilla") {
+					if (!isInstalled && clientName != "Default") {
 						ImGui::EndDisabled();
 					}
 				}
@@ -329,7 +329,7 @@ void RenderSettingsTab() {
 		for (std::string_view clientName : g_availableClientsNames) {
 			const std::string clientStr(clientName);
 			const bool isInstalled = MultiInstance::isBaseClientInstalled(clientStr);
-			const bool needsKey = (clientName != "Vanilla") && (clientName != "MacSploit");
+			const bool needsKey = (clientName != "Default") && (clientName != "MacSploit");
 
 			ImGui::TableNextRow();
 			ImGui::PushID(clientStr.c_str());
