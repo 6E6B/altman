@@ -2,9 +2,9 @@
 #define NOGDI
 
 // Windows headers must come first, before OpenSSL
+#include <windows.h>
 #include <dpapi.h>
 #include <wincrypt.h>
-#include <windows.h>
 
 // Prevent OpenSSL from redefining Windows crypto types
 #define OPENSSL_NO_WINCRYPT

@@ -18,6 +18,71 @@
 #include "../../components/components.h"
 
 namespace Roblox {
+	/**
+	 * Batch fetch user profiles (names) from the User Profile API.
+	 * This is needed because the Friends API no longer returns name/displayName fields.
+	 * @param userIds Vector of user IDs to fetch (will be batched in groups of 100)
+	 * @return Map of userId -> combinedName
+	 */
+	inline std::unordered_map<uint64_t, std::string> getUserProfiles(const std::vector<uint64_t> &userIds) {
+		std::unordered_map<uint64_t, std::string> result;
+		if (userIds.empty()) { return result; }
+
+		const size_t batchSize = 100;
+		for (size_t i = 0; i < userIds.size(); i += batchSize) {
+			size_t end = (std::min)(userIds.size(), i + batchSize);
+			std::vector<uint64_t> batch(userIds.begin() + i, userIds.begin() + end);
+
+			nlohmann::json payload = {
+				{"fields",  {"names.combinedName", "names.username"}},
+				{"userIds", batch								   }
+			};
+
+			auto resp = HttpClient::post(
+				"https://apis.roblox.com/user-profile-api/v1/user/profiles/get-profiles",
+				{
+					{"Content-Type", "application/json"},
+					{"Accept",	   "application/json"}
+			},
+				payload.dump()
+			);
+
+			if (resp.status_code < 200 || resp.status_code >= 300) {
+				LOG_ERROR("Failed to fetch user profiles: HTTP " + std::to_string(resp.status_code));
+				continue;
+			}
+
+			try {
+				nlohmann::json j = HttpClient::decode(resp);
+				if (j.contains("profileDetails") && j["profileDetails"].is_array()) {
+					for (const auto &profile : j["profileDetails"]) {
+						uint64_t uid = profile.value("userId", 0ULL);
+						if (uid == 0) { continue; }
+
+						std::string combinedName;
+						std::string username;
+						if (profile.contains("names") && profile["names"].is_object()) {
+							const auto &names = profile["names"];
+							if (names.contains("combinedName") && names["combinedName"].is_string()) {
+								combinedName = names["combinedName"].get<std::string>();
+							}
+							if (names.contains("username") && names["username"].is_string()) {
+								username = names["username"].get<std::string>();
+							}
+						}
+
+						// Store as "combinedName|username" so we can split later
+						// If username is empty, just store combinedName twice
+						if (username.empty()) { username = combinedName; }
+						result[uid] = combinedName + "|" + username;
+					}
+				}
+			} catch (const std::exception &e) { LOG_ERROR(std::string("Error parsing user profiles: ") + e.what()); }
+		}
+
+		return result;
+	}
+
 	static std::vector<FriendInfo> getFriends(const std::string &userId, const std::string &cookie) {
 		if (!canUseCookie(cookie)) { return {}; }
 
@@ -37,15 +102,44 @@ namespace Roblox {
 
 		nlohmann::json j = HttpClient::decode(resp);
 		std::vector<FriendInfo> friends;
+		std::vector<uint64_t> friendIds;
+
 		if (j.contains("data") && j["data"].is_array()) {
 			for (const auto &item : j["data"]) {
 				FriendInfo f;
 				f.id = item.value("id", 0ULL);
+				// These fields are now empty from the API, but we still try to read them as fallback
 				f.displayName = item.value("displayName", "");
 				f.username = item.value("name", "");
 				friends.push_back(f);
+				if (f.id != 0) { friendIds.push_back(f.id); }
 			}
 		}
+
+		// Fetch names from User Profile API since Friends API no longer returns them
+		if (!friendIds.empty()) {
+			LOG_INFO("Fetching friend names from User Profile API...");
+			auto profiles = getUserProfiles(friendIds);
+			for (auto &f : friends) {
+				auto it = profiles.find(f.id);
+				if (it != profiles.end()) {
+					// Format is "combinedName|username"
+					size_t sep = it->second.find('|');
+					if (sep != std::string::npos) {
+						f.displayName = it->second.substr(0, sep);
+						f.username = it->second.substr(sep + 1);
+					} else {
+						f.displayName = it->second;
+						f.username = it->second;
+					}
+				} else if (f.displayName.empty() && f.username.empty()) {
+					// Fallback to user ID if profile fetch failed
+					f.displayName = std::to_string(f.id);
+					f.username = std::to_string(f.id);
+				}
+			}
+		}
+
 		return friends;
 	}
 
@@ -203,12 +297,15 @@ namespace Roblox {
 				page.prevCursor = j["previousPageCursor"].get<std::string>();
 			}
 
+			std::vector<uint64_t> requestUserIds;
+
 			if (j.contains("data") && j["data"].is_array()) {
 				for (const auto &it : j["data"]) {
 					IncomingFriendRequest r;
 
 					if (it.contains("id") && it["id"].is_number_unsigned()) { r.userId = it["id"].get<uint64_t>(); }
 
+					// These fields are now empty from the API, but we still try to read them as fallback
 					if (it.contains("name") && it["name"].is_string()) { r.username = it["name"].get<std::string>(); }
 
 					if (it.contains("displayName") && it["displayName"].is_string()) {
@@ -238,7 +335,31 @@ namespace Roblox {
 						}
 					}
 
+					if (r.userId != 0) { requestUserIds.push_back(r.userId); }
 					page.data.push_back(std::move(r));
+				}
+			}
+
+			// Fetch names from User Profile API since Friends API no longer returns them
+			if (!requestUserIds.empty()) {
+				auto profiles = getUserProfiles(requestUserIds);
+				for (auto &r : page.data) {
+					auto it = profiles.find(r.userId);
+					if (it != profiles.end()) {
+						// Format is "combinedName|username"
+						size_t sep = it->second.find('|');
+						if (sep != std::string::npos) {
+							r.displayName = it->second.substr(0, sep);
+							r.username = it->second.substr(sep + 1);
+						} else {
+							r.displayName = it->second;
+							r.username = it->second;
+						}
+					} else if (r.displayName.empty() && r.username.empty()) {
+						// Fallback to user ID if profile fetch failed
+						r.displayName = std::to_string(r.userId);
+						r.username = std::to_string(r.userId);
+					}
 				}
 			}
 		} catch (const std::exception &e) {
