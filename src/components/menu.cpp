@@ -10,6 +10,7 @@
 
 #include "backup.h"
 #include "components.h"
+#include "core/account_utils.h"
 #include "core/app_state.h"
 #include "core/status.h"
 #include "data.h"
@@ -100,6 +101,9 @@ static void ProcessAddAccountFromCookie(const std::string &trimmedCookie) {
 			newAcct.note = "";
 			newAcct.isFavorite = false;
 
+			// Generate HBA keys for the new account
+			AccountUtils::generateHBAKeys(newAcct);
+
 			g_accounts.push_back(move(newAcct));
 
 			LOG_INFO("Added new account " + to_string(nextId) + " - " + g_accounts.back().displayName.c_str());
@@ -120,12 +124,117 @@ static void LaunchWebViewLogin() {
 	LOG_INFO("Launching WebView login window...");
 
 	Threading::newThread([]() {
+		// Always reset state even if exceptions occur.
+		struct LoginGuard {
+				bool &flag;
+				~LoginGuard() { flag = false; }
+		} guard {loginInProgress};
+
+		// Build a per-attempt unique WebView2 profile (fresh cookie jar every time).
+		auto makeGuidW = []() -> std::wstring {
+			GUID g {};
+			if (FAILED(CoCreateGuid(&g))) { return L""; }
+			wchar_t buf[64] {};
+			// 32 hex digits, no braces.
+			swprintf(
+				buf,
+				64,
+				L"%08lX%04hX%04hX%02hhX%02hhX%02hhX%02hhX%02hhX%02hhX%02hhX%02hhX",
+				g.Data1,
+				g.Data2,
+				g.Data3,
+				g.Data4[0],
+				g.Data4[1],
+				g.Data4[2],
+				g.Data4[3],
+				g.Data4[4],
+				g.Data4[5],
+				g.Data4[6],
+				g.Data4[7]
+			);
+			return std::wstring(buf);
+		};
+
+		const std::wstring guid = makeGuidW();
+		const std::wstring tempUserId = L"temp_login_" + (guid.empty() ? std::wstring(L"fallback") : guid);
+
+		// Compute the exact user data folder path used by WebViewWindow for this userId
+		// (mirrors the sanitization logic in WebViewWindow).
+		auto bestEffortDeleteProfileFolder = [](const std::wstring &userId) {
+			auto sanitizeUserId = [](const std::wstring &userId) -> std::wstring {
+				std::wstring sanitized;
+				sanitized.reserve(userId.size());
+				for (wchar_t ch : userId) {
+					if ((ch >= L'0' && ch <= L'9') || (ch >= L'a' && ch <= L'z') || (ch >= L'A' && ch <= L'Z')
+						|| ch == L'_') {
+						sanitized.push_back(ch);
+					} else {
+						sanitized.push_back(L'_');
+					}
+				}
+				return sanitized;
+			};
+
+			auto wstringToString = [](const std::wstring &ws) -> std::string {
+				if (ws.empty()) { return {}; }
+				int len = WideCharToMultiByte(
+					CP_UTF8,
+					0,
+					ws.data(),
+					static_cast<int>(ws.size()),
+					nullptr,
+					0,
+					nullptr,
+					nullptr
+				);
+				std::string s(len, '\0');
+				WideCharToMultiByte(
+					CP_UTF8,
+					0,
+					ws.data(),
+					static_cast<int>(ws.size()),
+					s.data(),
+					len,
+					nullptr,
+					nullptr
+				);
+				return s;
+			};
+
+			try {
+				namespace fs = std::filesystem;
+
+				wchar_t appDataPath[MAX_PATH] {};
+				SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, appDataPath);
+				fs::path base = fs::path(appDataPath) / L"WebViewProfiles" / L"Roblox";
+				fs::path folder = base / (L"u_" + sanitizeUserId(userId));
+
+				// Retry a few times to handle WebView2 file locks during teardown.
+				for (int attempt = 1; attempt <= 8; ++attempt) {
+					std::error_code ec;
+					if (!fs::exists(folder, ec)) { return; }
+
+					fs::remove_all(folder, ec);
+					if (!ec) {
+						LOG_INFO("Cleaned WebView login profile folder: " + wstringToString(userId));
+						return;
+					}
+
+					std::this_thread::sleep_for(std::chrono::milliseconds(75));
+				}
+
+				LOG_WARN("Could not delete WebView login profile folder after retries: " + wstringToString(userId));
+			} catch (const std::exception &ex) {
+				LOG_WARN(std::string("WebView login profile cleanup error: ") + ex.what());
+			}
+		};
+
 		try {
 			auto win = std::make_unique<WebViewWindow>(
 				L"https://www.roblox.com/login?returnUrl=https%3A%2F%2Fwww.roblox.com%2Fhome",
 				L"Roblox Login - Altman",
 				L"",
-				L"temp_login"
+				tempUserId
 			);
 
 			win->enableAuthMonitoring([](const std::string &cookie) {
@@ -144,14 +253,20 @@ static void LaunchWebViewLogin() {
 				}
 			});
 
+			// Ensure correct teardown ordering: window loop ends first, then cleanup.
 			if (win->create()) {
 				win->messageLoop();
 			} else {
 				LOG_ERROR("Failed to create WebView login window");
 			}
-		} catch (const exception &ex) { LOG_ERROR(string("WebView login error: ") + ex.what()); }
 
-		loginInProgress = false;
+			// Best-effort cleanup after window is destroyed and WebView2 should have released handles.
+			bestEffortDeleteProfileFolder(tempUserId);
+		} catch (const exception &ex) {
+			LOG_ERROR(string("WebView login error: ") + ex.what());
+			// Even on error, attempt cleanup for this attempt.
+			bestEffortDeleteProfileFolder(tempUserId);
+		}
 	});
 }
 
@@ -515,6 +630,9 @@ bool RenderMainMenu() {
 			newAcct.voiceBanExpiry = g_duplicateAccountModal.pendingVoiceStatus.bannedUntil;
 			newAcct.note = "";
 			newAcct.isFavorite = false;
+
+			// Generate HBA keys for the new account
+			AccountUtils::generateHBAKeys(newAcct);
 
 			g_accounts.push_back(move(newAcct));
 

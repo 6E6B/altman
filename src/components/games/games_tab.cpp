@@ -513,8 +513,9 @@ static void RenderGameDetailsPanel(float panelWidth, float availableHeight) {
 					}
 				}
 				if (!accounts.empty()) {
-					thread([placeId = gameInfo.placeId, accounts]() { launchRobloxSequential(placeId, "", accounts); }
-					).detach();
+					thread([placeId = gameInfo.placeId, accounts]() {
+						launchRobloxSequential(placeId, "", accounts);
+					}).detach();
 				} else {
 					Status::Error("Selected account not found to launch game.");
 				}

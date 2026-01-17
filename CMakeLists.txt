@@ -13,6 +13,7 @@ find_package(cpr CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(unofficial-webview2 CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 file(GLOB_RECURSE APP_SRC
     "src/*.cpp"
@@ -43,6 +44,8 @@ target_link_libraries(altman PRIVATE
     cpr::cpr
     nlohmann_json::nlohmann_json
     unofficial::webview2::webview2
+    OpenSSL::SSL
+    OpenSSL::Crypto
     d3d11
     dxgi
     d3dcompiler

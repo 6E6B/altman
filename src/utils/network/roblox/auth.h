@@ -6,8 +6,11 @@
 #include <string>
 #include <unordered_map>
 
+#include "authenticated_http.h"
 #include "core/logging.hpp"
 #include "core/time_utils.h"
+#include "hba.h"
+#include "hba_client.h"
 #include "http.hpp"
 #include "status.h"
 
@@ -112,16 +115,22 @@ namespace Roblox {
 		return true;
 	}
 
-	static nlohmann::json getAuthenticatedUser(const std::string &cookie) {
-		if (!canUseCookie(cookie)) { return nlohmann::json::object(); }
+	// ============================================================================
+	// HBA-enabled methods (with BAT support)
+	// ============================================================================
 
-		LOG_INFO("Fetching profile info");
-		HttpClient::Response response = HttpClient::get(
-			"https://users.roblox.com/v1/users/authenticated",
-			{
-				{"Cookie", ".ROBLOSECURITY=" + cookie}
-		}
-		);
+	/**
+	 * Get authenticated user info with HBA support
+	 * @param config HBA authentication configuration
+	 * @return JSON object with user info, or empty object on failure
+	 */
+	static nlohmann::json getAuthenticatedUser(const HBA::AuthConfig &config) {
+		if (!canUseCookie(config.cookie)) { return nlohmann::json::object(); }
+
+		LOG_INFO("Fetching profile info (HBA-enabled)");
+
+		const std::string url = "https://users.roblox.com/v1/users/authenticated";
+		HttpClient::Response response = AuthenticatedHttp::get(url, config);
 
 		if (response.status_code < 200 || response.status_code >= 300) {
 			LOG_ERROR("Failed to fetch user info: HTTP " + std::to_string(response.status_code));
@@ -131,53 +140,96 @@ namespace Roblox {
 		return HttpClient::decode(response);
 	}
 
-	static std::string fetchAuthTicket(const std::string &cookie) {
-		if (!canUseCookie(cookie)) { return ""; }
-		LOG_INFO("Fetching x-csrf token");
-		std::cout << cookie;
-		auto csrfResponse = HttpClient::post(
-			"https://auth.roblox.com/v1/authentication-ticket",
-			{
-				{"Cookie", ".ROBLOSECURITY=" + cookie}
-		}
-		);
+	/**
+	 * Fetch authentication ticket with HBA support
+	 * This endpoint is protected by Account Session Protection
+	 * @param config HBA authentication configuration
+	 * @return Authentication ticket string, or empty on failure
+	 */
+	static std::string fetchAuthTicket(const HBA::AuthConfig &config) {
+		if (!canUseCookie(config.cookie)) { return ""; }
+
+		const std::string url = "https://auth.roblox.com/v1/authentication-ticket";
+
+		LOG_INFO("Fetching x-csrf token (HBA-enabled)");
+
+		// First request to get CSRF token
+		auto csrfResponse = AuthenticatedHttp::post(url, config);
 
 		auto csrfToken = csrfResponse.headers.find("x-csrf-token");
 		if (csrfToken == csrfResponse.headers.end()) {
-			std::cerr << "failed to get CSRF token\n";
-
-			LOG_INFO("Failed to get CSRF token");
+			LOG_ERROR("Failed to get CSRF token");
 			return "";
 		}
 
 		LOG_INFO("Fetching authentication ticket");
-		auto ticketResponse = HttpClient::post(
-			"https://auth.roblox.com/v1/authentication-ticket",
-			{
-				{"Cookie",	   ".ROBLOSECURITY=" + cookie},
-				{"Origin",	   "https://www.roblox.com"  },
-				{"Referer",		"https://www.roblox.com/" },
-				{"X-CSRF-TOKEN", csrfToken->second		  }
-		}
-		);
 
-		if (ticketResponse.status_code < 200 || ticketResponse.status_code >= 300) {
-			LOG_ERROR("Failed to fetch auth ticket: HTTP " + std::to_string(ticketResponse.status_code));
+		// Build headers for the actual request
+		std::map<std::string, std::string> headers;
+		headers["Cookie"] = ".ROBLOSECURITY=" + config.cookie;
+		headers["Origin"] = "https://www.roblox.com";
+		headers["Referer"] = "https://www.roblox.com/";
+		headers["X-CSRF-TOKEN"] = csrfToken->second;
+
+		// Generate BAT header if HBA is enabled
+		if (config.hasHBA()) {
+			auto batHeaders = HBA::getClient().generateBATHeaders(config, url, "POST", "");
+			for (const auto &[key, value] : batHeaders) { headers[key] = value; }
+		}
+
+		auto r = HttpClient::postWithHeaders(url, headers, "");
+
+		if (r.status_code < 200 || r.status_code >= 300) {
+			LOG_ERROR("Failed to fetch auth ticket: HTTP " + std::to_string(r.status_code));
 			return "";
 		}
 
-		auto ticket = ticketResponse.headers.find("rbx-authentication-ticket");
-		if (ticket == ticketResponse.headers.end()) {
-			std::cerr << "failed to get authentication ticket\n";
-			LOG_INFO("Failed to get authentication ticket");
+		auto ticket = r.headers.find("rbx-authentication-ticket");
+		if (ticket == r.headers.end()) {
+			LOG_ERROR("Failed to get authentication ticket from response");
 			return "";
 		}
 
 		return ticket->second;
 	}
 
+	// ============================================================================
+	// Legacy methods (without HBA - for backward compatibility)
+	// ============================================================================
+
+	/**
+	 * Get authenticated user info (legacy, no HBA)
+	 * @param cookie The .ROBLOSECURITY cookie
+	 * @return JSON object with user info, or empty object on failure
+	 */
+	static nlohmann::json getAuthenticatedUser(const std::string &cookie) {
+		// Create config without HBA for backward compatibility
+		HBA::AuthConfig config {.cookie = cookie, .hbaPrivateKey = "", .hbaEnabled = false};
+		return getAuthenticatedUser(config);
+	}
+
+	/**
+	 * Fetch authentication ticket (legacy, no HBA)
+	 * @param cookie The .ROBLOSECURITY cookie
+	 * @return Authentication ticket string, or empty on failure
+	 */
+	static std::string fetchAuthTicket(const std::string &cookie) {
+		// Create config without HBA for backward compatibility
+		HBA::AuthConfig config {.cookie = cookie, .hbaPrivateKey = "", .hbaEnabled = false};
+		return fetchAuthTicket(config);
+	}
+
+	// ============================================================================
+	// Utility methods
+	// ============================================================================
+
 	static uint64_t getUserId(const std::string &cookie) {
 		auto userJson = getAuthenticatedUser(cookie);
+		return userJson.value("id", 0ULL);
+	}
+
+	static uint64_t getUserId(const HBA::AuthConfig &config) {
+		auto userJson = getAuthenticatedUser(config);
 		return userJson.value("id", 0ULL);
 	}
 
@@ -186,8 +238,35 @@ namespace Roblox {
 		return userJson.value("name", "");
 	}
 
+	static std::string getUsername(const HBA::AuthConfig &config) {
+		auto userJson = getAuthenticatedUser(config);
+		return userJson.value("name", "");
+	}
+
 	static std::string getDisplayName(const std::string &cookie) {
 		auto userJson = getAuthenticatedUser(cookie);
 		return userJson.value("displayName", "");
 	}
+
+	static std::string getDisplayName(const HBA::AuthConfig &config) {
+		auto userJson = getAuthenticatedUser(config);
+		return userJson.value("displayName", "");
+	}
+
+	/**
+	 * Create an HBA AuthConfig from account credentials
+	 * @param cookie The .ROBLOSECURITY cookie
+	 * @param hbaPrivateKey PEM-encoded private key (empty to disable HBA)
+	 * @param hbaEnabled Whether HBA is enabled for this account
+	 * @return AuthConfig structure
+	 */
+	static HBA::AuthConfig
+		makeAuthConfig(const std::string &cookie, const std::string &hbaPrivateKey = "", bool hbaEnabled = true) {
+		return HBA::AuthConfig {
+			.cookie = cookie,
+			.hbaPrivateKey = hbaPrivateKey,
+			.hbaEnabled = hbaEnabled && !hbaPrivateKey.empty()
+		};
+	}
+
 } // namespace Roblox

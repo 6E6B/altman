@@ -70,4 +70,73 @@ namespace HttpClient {
 			return nlohmann::json::object();
 		}
 	}
+
+	// ============================================================================
+	// Extended request methods with additional header support
+	// ============================================================================
+
+	/**
+	 * Make a GET request with additional headers map
+	 * @param url The request URL
+	 * @param headers Map of headers to include
+	 * @param params URL parameters
+	 * @return Response
+	 */
+	inline Response getWithHeaders(
+		const std::string &url,
+		const std::map<std::string, std::string> &headers,
+		cpr::Parameters params = {}
+	) {
+		cpr::Header h;
+		for (const auto &[key, value] : headers) { h[key] = value; }
+		auto r = cpr::Get(cpr::Url {url}, h, params);
+		std::map<std::string, std::string> hdrs(r.header.begin(), r.header.end());
+		return {r.status_code, r.text, hdrs};
+	}
+
+	/**
+	 * Make a POST request with additional headers map
+	 * @param url The request URL
+	 * @param headers Map of headers to include
+	 * @param jsonBody JSON body string
+	 * @return Response
+	 */
+	inline Response postWithHeaders(
+		const std::string &url,
+		const std::map<std::string, std::string> &headers,
+		const std::string &jsonBody = ""
+	) {
+		cpr::Header h;
+		for (const auto &[key, value] : headers) { h[key] = value; }
+
+		cpr::Response r;
+		if (!jsonBody.empty()) {
+			h["Content-Type"] = "application/json";
+			r = cpr::Post(cpr::Url {url}, h, cpr::Body {jsonBody});
+		} else {
+			r = cpr::Post(cpr::Url {url}, h);
+		}
+
+		std::map<std::string, std::string> hdrs(r.header.begin(), r.header.end());
+		return {r.status_code, r.text, hdrs};
+	}
+
+	/**
+	 * Fetch CSRF token from Roblox endpoint
+	 * @param url The URL to fetch CSRF from
+	 * @param cookie The .ROBLOSECURITY cookie
+	 * @return CSRF token string, or empty on failure
+	 */
+	inline std::string fetchCSRFToken(const std::string &url, const std::string &cookie) {
+		auto response = post(
+			url,
+			{
+				{"Cookie", ".ROBLOSECURITY=" + cookie}
+		}
+		);
+		auto it = response.headers.find("x-csrf-token");
+		if (it != response.headers.end()) { return it->second; }
+		return "";
+	}
+
 } // namespace HttpClient

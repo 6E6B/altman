@@ -1,5 +1,14 @@
 ﻿#define WIN32_LEAN_AND_MEAN
 #define NOGDI
+
+// Windows headers must come first, before OpenSSL
+#include <dpapi.h>
+#include <wincrypt.h>
+#include <windows.h>
+
+// Prevent OpenSSL from redefining Windows crypto types
+#define OPENSSL_NO_WINCRYPT
+
 #include "data.h"
 #include <filesystem>
 #include <fstream>
@@ -9,9 +18,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <windows.h>
-#include <wincrypt.h>
-#include <dpapi.h>
 
 #include "core/app_state.h"
 #include "core/base64.h"
@@ -152,6 +158,30 @@ namespace Data {
 			account.lastLocation = item.value("lastLocation", "");
 			account.placeId = item.value("placeId", 0ULL);
 			account.jobId = item.value("jobId", "");
+			account.hbaEnabled = item.value("hbaEnabled", true);
+
+			// Load encrypted HBA private key
+			if (item.contains("encryptedHbaKey")) {
+				std::string b64EncryptedKey = item.value("encryptedHbaKey", "");
+				if (!b64EncryptedKey.empty()) {
+					try {
+						std::vector<BYTE> encryptedKeyBytes = base64_decode(b64EncryptedKey);
+						account.hbaPrivateKey = decryptData(encryptedKeyBytes);
+						if (account.hbaPrivateKey.empty() && !encryptedKeyBytes.empty()) {
+							LOG_ERROR(
+								"Failed to decrypt HBA key for account ID " + std::to_string(account.id)
+								+ ". Key will be regenerated."
+							);
+						}
+					} catch (const exception &e) {
+						LOG_ERROR(
+							"Exception during HBA key decryption for account ID " + std::to_string(account.id) + ": "
+							+ e.what()
+						);
+						account.hbaPrivateKey = "";
+					}
+				}
+			}
 
 			if (item.contains("encryptedCookie")) {
 				string b64EncryptedCookie = item.value("encryptedCookie", "");
@@ -212,6 +242,21 @@ namespace Data {
 				}
 			}
 
+			// Encrypt HBA private key
+			std::string b64EncryptedHbaKey;
+			if (!account.hbaPrivateKey.empty()) {
+				try {
+					std::vector<BYTE> encryptedKeyBytes = encryptData(account.hbaPrivateKey);
+					b64EncryptedHbaKey = base64_encode(encryptedKeyBytes);
+				} catch (const exception &exception) {
+					LOG_ERROR(
+						"Exception during HBA key encryption for account ID " + std::to_string(account.id) + ": "
+						+ exception.what() + ". Key will not be saved."
+					);
+					b64EncryptedHbaKey = "";
+				}
+			}
+
 			dataArray.push_back({
 				{"id",			   account.id			 },
 				{"displayName",		account.displayName   },
@@ -226,7 +271,9 @@ namespace Data {
 				{"isFavorite",	   account.isFavorite	 },
 				{"lastLocation",	 account.lastLocation	 },
 				{"placeId",			account.placeId	   },
-				{"jobId",			  account.jobId		   }
+				{"jobId",			  account.jobId		   },
+				{"encryptedHbaKey", b64EncryptedHbaKey	  },
+				{"hbaEnabled",	   account.hbaEnabled	 }
 			});
 		}
 		out << dataArray.dump(4);
@@ -246,11 +293,13 @@ namespace Data {
 			json arr;
 			fin >> arr;
 			for (auto &j : arr) {
-				g_favorites.push_back(FavoriteGame {
-					j.value("name", ""),
-					j.value("universeId", 0ULL),
-					j.value("placeId", j.value("universeId", 0ULL))
-				});
+				g_favorites.push_back(
+					FavoriteGame {
+						j.value("name", ""),
+						j.value("universeId", 0ULL),
+						j.value("placeId", j.value("universeId", 0ULL))
+					}
+				);
 			}
 			LOG_INFO("Loaded " + std::to_string(g_favorites.size()) + " favourites");
 		} catch (const std::exception &e) { LOG_ERROR("Could not parse " + filename + ": " + e.what()); }

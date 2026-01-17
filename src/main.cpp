@@ -18,6 +18,7 @@
 #include <tchar.h>
 
 #include "components/data.h"
+#include "core/account_utils.h"
 #include "core/logging.hpp"
 #include "network/roblox.h"
 #include "system/main_thread.h"
@@ -187,6 +188,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	if (g_checkUpdatesOnStartup) { CheckForUpdates(); }
 	Data::LoadAccounts("accounts.json");
 	Data::LoadFriends("friends.json");
+
+	// Migrate existing accounts to HBA (generate keys if missing)
+	int migratedCount = AccountUtils::migrateAccountsToHBA(g_accounts);
+	if (migratedCount > 0) {
+		Data::SaveAccounts("accounts.json");
+		LOG_INFO("Saved accounts after HBA migration");
+	}
 
 	auto refreshAccounts = [] {
 		std::vector<int> invalidIds;

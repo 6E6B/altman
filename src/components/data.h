@@ -27,6 +27,10 @@ struct AccountData {
 		// Cached presence details for join menu
 		uint64_t placeId = 0;
 		std::string jobId;
+
+		// HBA (Hardware-Backed Authentication) fields
+		std::string hbaPrivateKey; // PEM-encoded ECDSA P-256 private key (encrypted at rest)
+		bool hbaEnabled = true; // Whether to use BAT for this account
 };
 
 struct FavoriteGame {

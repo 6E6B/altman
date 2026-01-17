@@ -5,7 +5,7 @@
 #include <vector>
 #include <windows.h>
 
-std::string base64_encode(const std::vector<BYTE> &data) {
+inline std::string base64_encode(const std::vector<BYTE> &data) {
 	static const std::string base64_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 											"abcdefghijklmnopqrstuvwxyz"
 											"0123456789+/";
@@ -45,7 +45,7 @@ std::string base64_encode(const std::vector<BYTE> &data) {
 	return ret;
 }
 
-std::vector<BYTE> base64_decode(const std::string &encoded_string) {
+inline std::vector<BYTE> base64_decode(const std::string &encoded_string) {
 	static const std::string base64_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 											"abcdefghijklmnopqrstuvwxyz"
 											"0123456789+/";

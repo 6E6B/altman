@@ -8,7 +8,10 @@
 #include <vector>
 
 #include "auth.h"
+#include "authenticated_http.h"
 #include "core/logging.hpp"
+#include "hba.h"
+#include "hba_client.h"
 #include "http.hpp"
 #include "threading.h"
 
@@ -245,41 +248,44 @@ namespace Roblox {
 		return page;
 	}
 
+	// ============================================================================
+	// HBA-enabled friend request methods
+	// ============================================================================
+
+	/**
+	 * Accept a friend request with HBA support
+	 * @param targetUserId The user ID to accept
+	 * @param config HBA authentication configuration
+	 * @param outResponse Optional output for response text
+	 * @return true if successful
+	 */
 	inline bool acceptFriendRequest(
 		const std::string &targetUserId,
-		const std::string &cookie,
+		const HBA::AuthConfig &config,
 		std::string *outResponse = nullptr
 	) {
-		if (!canUseCookie(cookie)) {
+		if (!canUseCookie(config.cookie)) {
 			if (outResponse) { *outResponse = "Banned/warned cookie"; }
 			return false;
 		}
 		std::string url = "https://friends.roblox.com/v1/users/" + targetUserId + "/accept-friend-request";
 
-		auto csrfResp = HttpClient::post(
-			url,
-			{
-				{"Cookie", ".ROBLOSECURITY=" + cookie}
-		}
-		);
-		auto it = csrfResp.headers.find("x-csrf-token");
-		if (it == csrfResp.headers.end()) {
-			if (outResponse) { *outResponse = "Missing CSRF token"; }
-			return false;
-		}
-
-		auto resp = HttpClient::post(
-			url,
-			{
-				{"Cookie",	   ".ROBLOSECURITY=" + cookie},
-				{"Origin",	   "https://www.roblox.com"  },
-				{"Referer",		"https://www.roblox.com/" },
-				{"X-CSRF-TOKEN", it->second				   }
-		}
-		);
+		auto resp = AuthenticatedHttp::postWithCSRF(url, config);
 
 		if (outResponse) { *outResponse = resp.text; }
 		return resp.status_code >= 200 && resp.status_code < 300;
+	}
+
+	/**
+	 * Accept a friend request (legacy, no HBA)
+	 */
+	inline bool acceptFriendRequest(
+		const std::string &targetUserId,
+		const std::string &cookie,
+		std::string *outResponse = nullptr
+	) {
+		HBA::AuthConfig config {.cookie = cookie, .hbaPrivateKey = "", .hbaEnabled = false};
+		return acceptFriendRequest(targetUserId, config, outResponse);
 	}
 
 	inline uint64_t getUserIdFromUsername(const std::string &username) {
@@ -304,205 +310,181 @@ namespace Roblox {
 		return j["data"][0].value("id", 0ULL);
 	}
 
+	/**
+	 * Send a friend request with HBA support
+	 * @param targetUserId The user ID to send request to
+	 * @param config HBA authentication configuration
+	 * @param outResponse Optional output for response text
+	 * @return true if successful
+	 */
 	inline bool sendFriendRequest(
 		const std::string &targetUserId,
-		const std::string &cookie,
+		const HBA::AuthConfig &config,
 		std::string *outResponse = nullptr
 	) {
-		if (!canUseCookie(cookie)) {
+		if (!canUseCookie(config.cookie)) {
 			if (outResponse) { *outResponse = "Banned/warned cookie"; }
 			return false;
 		}
 		std::string url = "https://friends.roblox.com/v1/users/" + targetUserId + "/request-friendship";
 
-		auto csrfResp = HttpClient::post(
-			url,
-			{
-				{"Cookie", ".ROBLOSECURITY=" + cookie}
-		}
-		);
-		auto it = csrfResp.headers.find("x-csrf-token");
-		if (it == csrfResp.headers.end()) {
-			if (outResponse) { *outResponse = "Missing CSRF token"; }
-			std::cerr << "friend request: missing CSRF token\n";
-			return false;
-		}
-
 		nlohmann::json body = {
 			{"friendshipOriginSourceType", 0}
 		};
 
-		auto resp = HttpClient::post(
-			url,
-			{
-				{"Cookie",	   ".ROBLOSECURITY=" + cookie},
-				{"Origin",	   "https://www.roblox.com"  },
-				{"Referer",		"https://www.roblox.com/" },
-				{"X-CSRF-TOKEN", it->second				   }
-		},
-			body.dump()
-		);
+		auto resp = AuthenticatedHttp::postWithCSRF(url, config, body.dump());
 
 		if (outResponse) { *outResponse = resp.text; }
 
 		if (resp.status_code < 200 || resp.status_code >= 300) {
-			std::cerr << "friend request failed HTTP " << resp.status_code << ": " << resp.text << "\n";
+			LOG_ERROR("Friend request failed HTTP " + std::to_string(resp.status_code) + ": " + resp.text);
 			return false;
 		}
 
 		auto j = HttpClient::decode(resp);
 		bool success = j.value("success", false);
-		if (success) {
-			std::cerr << "friend request success: " << resp.text << "\n";
-		} else {
-			std::cerr << "friend request API failure: " << resp.text << "\n";
-		}
+		if (!success) { LOG_ERROR("Friend request API failure: " + resp.text); }
 		return success;
 	}
 
+	/**
+	 * Send a friend request (legacy, no HBA)
+	 */
+	inline bool sendFriendRequest(
+		const std::string &targetUserId,
+		const std::string &cookie,
+		std::string *outResponse = nullptr
+	) {
+		HBA::AuthConfig config {.cookie = cookie, .hbaPrivateKey = "", .hbaEnabled = false};
+		return sendFriendRequest(targetUserId, config, outResponse);
+	}
+
+	/**
+	 * Unfriend a user with HBA support
+	 * @param targetUserId The user ID to unfriend
+	 * @param config HBA authentication configuration
+	 * @param outResponse Optional output for response text
+	 * @return true if successful
+	 */
 	inline bool
-		unfriend(const std::string &targetUserId, const std::string &cookie, std::string *outResponse = nullptr) {
-		if (!canUseCookie(cookie)) {
+		unfriend(const std::string &targetUserId, const HBA::AuthConfig &config, std::string *outResponse = nullptr) {
+		if (!canUseCookie(config.cookie)) {
 			if (outResponse) { *outResponse = "Banned/warned cookie"; }
 			return false;
 		}
 		std::string url = "https://friends.roblox.com/v1/users/" + targetUserId + "/unfriend";
 
-		auto csrfResp = HttpClient::post(
-			url,
-			{
-				{"Cookie", ".ROBLOSECURITY=" + cookie}
-		}
-		);
-		auto it = csrfResp.headers.find("x-csrf-token");
-		if (it == csrfResp.headers.end()) {
-			if (outResponse) { *outResponse = "Missing CSRF token"; }
-			return false;
-		}
-
-		auto resp = HttpClient::post(
-			url,
-			{
-				{"Cookie",	   ".ROBLOSECURITY=" + cookie},
-				{"Origin",	   "https://www.roblox.com"  },
-				{"Referer",		"https://www.roblox.com/" },
-				{"X-CSRF-TOKEN", it->second				   }
-		}
-		);
+		auto resp = AuthenticatedHttp::postWithCSRF(url, config);
 
 		if (outResponse) { *outResponse = resp.text; }
 
 		if (resp.status_code < 200 || resp.status_code >= 300) {
-			std::cerr << "unfriend failed HTTP " << resp.status_code << ": " << resp.text << "\n";
+			LOG_ERROR("Unfriend failed HTTP " + std::to_string(resp.status_code) + ": " + resp.text);
 			return false;
 		}
 
 		return true;
 	}
 
+	/**
+	 * Unfriend a user (legacy, no HBA)
+	 */
 	inline bool
-		followUser(const std::string &targetUserId, const std::string &cookie, std::string *outResponse = nullptr) {
-		if (!canUseCookie(cookie)) {
+		unfriend(const std::string &targetUserId, const std::string &cookie, std::string *outResponse = nullptr) {
+		HBA::AuthConfig config {.cookie = cookie, .hbaPrivateKey = "", .hbaEnabled = false};
+		return unfriend(targetUserId, config, outResponse);
+	}
+
+	/**
+	 * Follow a user with HBA support
+	 * @param targetUserId The user ID to follow
+	 * @param config HBA authentication configuration
+	 * @param outResponse Optional output for response text
+	 * @return true if successful
+	 */
+	inline bool
+		followUser(const std::string &targetUserId, const HBA::AuthConfig &config, std::string *outResponse = nullptr) {
+		if (!canUseCookie(config.cookie)) {
 			if (outResponse) { *outResponse = "Banned/warned cookie"; }
 			return false;
 		}
 		std::string url = "https://friends.roblox.com/v1/users/" + targetUserId + "/follow";
 
-		auto csrfResp = HttpClient::post(
-			url,
-			{
-				{"Cookie", ".ROBLOSECURITY=" + cookie}
-		}
-		);
-		auto it = csrfResp.headers.find("x-csrf-token");
-		if (it == csrfResp.headers.end()) {
-			if (outResponse) { *outResponse = "Missing CSRF token"; }
-			return false;
-		}
-
-		auto resp = HttpClient::post(
-			url,
-			{
-				{"Cookie",	   ".ROBLOSECURITY=" + cookie},
-				{"Origin",	   "https://www.roblox.com"  },
-				{"Referer",		"https://www.roblox.com/" },
-				{"X-CSRF-TOKEN", it->second				   }
-		}
-		);
+		auto resp = AuthenticatedHttp::postWithCSRF(url, config);
 
 		if (outResponse) { *outResponse = resp.text; }
 		return resp.status_code >= 200 && resp.status_code < 300;
 	}
 
+	/**
+	 * Follow a user (legacy, no HBA)
+	 */
 	inline bool
-		unfollowUser(const std::string &targetUserId, const std::string &cookie, std::string *outResponse = nullptr) {
-		if (!canUseCookie(cookie)) {
+		followUser(const std::string &targetUserId, const std::string &cookie, std::string *outResponse = nullptr) {
+		HBA::AuthConfig config {.cookie = cookie, .hbaPrivateKey = "", .hbaEnabled = false};
+		return followUser(targetUserId, config, outResponse);
+	}
+
+	/**
+	 * Unfollow a user with HBA support
+	 * @param targetUserId The user ID to unfollow
+	 * @param config HBA authentication configuration
+	 * @param outResponse Optional output for response text
+	 * @return true if successful
+	 */
+	inline bool unfollowUser(
+		const std::string &targetUserId,
+		const HBA::AuthConfig &config,
+		std::string *outResponse = nullptr
+	) {
+		if (!canUseCookie(config.cookie)) {
 			if (outResponse) { *outResponse = "Banned/warned cookie"; }
 			return false;
 		}
 		std::string url = "https://friends.roblox.com/v1/users/" + targetUserId + "/unfollow";
 
-		auto csrfResp = HttpClient::post(
-			url,
-			{
-				{"Cookie", ".ROBLOSECURITY=" + cookie}
-		}
-		);
-		auto it = csrfResp.headers.find("x-csrf-token");
-		if (it == csrfResp.headers.end()) {
-			if (outResponse) { *outResponse = "Missing CSRF token"; }
-			return false;
-		}
-
-		auto resp = HttpClient::post(
-			url,
-			{
-				{"Cookie",	   ".ROBLOSECURITY=" + cookie},
-				{"Origin",	   "https://www.roblox.com"  },
-				{"Referer",		"https://www.roblox.com/" },
-				{"X-CSRF-TOKEN", it->second				   }
-		}
-		);
+		auto resp = AuthenticatedHttp::postWithCSRF(url, config);
 
 		if (outResponse) { *outResponse = resp.text; }
 		return resp.status_code >= 200 && resp.status_code < 300;
 	}
 
+	/**
+	 * Unfollow a user (legacy, no HBA)
+	 */
 	inline bool
-		blockUser(const std::string &targetUserId, const std::string &cookie, std::string *outResponse = nullptr) {
-		if (!canUseCookie(cookie)) {
+		unfollowUser(const std::string &targetUserId, const std::string &cookie, std::string *outResponse = nullptr) {
+		HBA::AuthConfig config {.cookie = cookie, .hbaPrivateKey = "", .hbaEnabled = false};
+		return unfollowUser(targetUserId, config, outResponse);
+	}
+
+	/**
+	 * Block a user with HBA support
+	 * @param targetUserId The user ID to block
+	 * @param config HBA authentication configuration
+	 * @param outResponse Optional output for response text
+	 * @return true if successful
+	 */
+	inline bool
+		blockUser(const std::string &targetUserId, const HBA::AuthConfig &config, std::string *outResponse = nullptr) {
+		if (!canUseCookie(config.cookie)) {
 			if (outResponse) { *outResponse = "Banned/warned cookie"; }
 			return false;
 		}
 		std::string url = "https://www.roblox.com/users/" + targetUserId + "/block";
 
-		auto csrfResp = HttpClient::post(
-			url,
-			{
-				{"Cookie", ".ROBLOSECURITY=" + cookie}
-		}
-		);
-		if (csrfResp.status_code < 200 || csrfResp.status_code >= 300) {
-			if (outResponse) { *outResponse = "Failed CSRF"; }
-			return false;
-		}
-		auto it = csrfResp.headers.find("x-csrf-token");
-		if (it == csrfResp.headers.end()) {
-			if (outResponse) { *outResponse = "Missing CSRF token"; }
-			return false;
-		}
-
-		auto resp = HttpClient::post(
-			url,
-			{
-				{"Cookie",	   ".ROBLOSECURITY=" + cookie},
-				{"Origin",	   "https://www.roblox.com"  },
-				{"Referer",		"https://www.roblox.com/" },
-				{"X-CSRF-TOKEN", it->second				   }
-		}
-		);
+		auto resp = AuthenticatedHttp::postWithCSRF(url, config);
 
 		if (outResponse) { *outResponse = resp.text; }
 		return resp.status_code >= 200 && resp.status_code < 300;
+	}
+
+	/**
+	 * Block a user (legacy, no HBA)
+	 */
+	inline bool
+		blockUser(const std::string &targetUserId, const std::string &cookie, std::string *outResponse = nullptr) {
+		HBA::AuthConfig config {.cookie = cookie, .hbaPrivateKey = "", .hbaEnabled = false};
+		return blockUser(targetUserId, config, outResponse);
 	}
 } // namespace Roblox

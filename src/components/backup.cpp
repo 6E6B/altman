@@ -1,4 +1,5 @@
 #include "backup.h"
+#include "../utils/core/account_utils.h"
 #include "../utils/core/logging.hpp"
 #include "../utils/system/threading.h"
 #include "data.h"
@@ -153,6 +154,10 @@ bool Backup::Import(const std::string &file, const std::string &password, std::s
 		auto vs = Roblox::getVoiceChatStatus(acct.cookie);
 		acct.voiceStatus = vs.status;
 		acct.voiceBanExpiry = vs.bannedUntil;
+
+		// Generate HBA keys for the imported account
+		AccountUtils::generateHBAKeys(acct);
+
 		g_accounts.push_back(std::move(acct));
 	}
 	if (j.contains("settings")) {

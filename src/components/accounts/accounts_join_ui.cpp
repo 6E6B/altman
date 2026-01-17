@@ -77,11 +77,13 @@ void RenderJoinOptions() {
 	Spacing();
 	Text("Join Options");
 	SameLine();
-	HelpMarker("Join Options:\n"
-			   "- Game: joins a game with its placeId\n"
-			   "- Instance: joins the instance of a game with its placeId & jobId\n"
-			   "- User: joins the instance a user is in with their username or userId (formatted as id=000)\n"
-			   "\t- User option is NOT a sniper, it only works for users who have joins on!");
+	HelpMarker(
+		"Join Options:\n"
+		"- Game: joins a game with its placeId\n"
+		"- Instance: joins the instance of a game with its placeId & jobId\n"
+		"- User: joins the instance a user is in with their username or userId (formatted as id=000)\n"
+		"\t- User option is NOT a sniper, it only works for users who have joins on!"
+	);
 	Spacing();
 	Combo(" Join Type", &join_type_combo_index, join_types_local, IM_ARRAYSIZE(join_types_local));
 

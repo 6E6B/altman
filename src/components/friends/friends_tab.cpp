@@ -1110,8 +1110,9 @@ void RenderFriendsTab() {
 					if (it != g_accounts.end()) { accounts.emplace_back(it->id, it->cookie); }
 				}
 				if (!accounts.empty()) {
-					Threading::newThread([row, accounts]() { launchRobloxSequential(row.placeId, row.jobId, accounts); }
-					);
+					Threading::newThread([row, accounts]() {
+						launchRobloxSequential(row.placeId, row.jobId, accounts);
+					});
 				}
 			}
 			EndDisabled();
