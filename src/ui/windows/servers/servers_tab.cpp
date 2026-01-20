@@ -1,4 +1,3 @@
-#define _CRT_SECURE_NO_WARNINGS
 #include "servers.h"
 #include "servers_utils.h"
 
@@ -479,7 +478,7 @@ namespace {
 						server.maxPlayers = 0;
 						server.playing = 0;
 						server.fps = 0.0f;
-						server.ping = 0.0;
+						server.ping = 0;
 						servers.push_back(std::move(server));
 						//serversByPlaceId[info.placeId].push_back(i);
 					}

@@ -4,51 +4,37 @@
 #include <format>
 #include <cstdio>
 
-#ifdef _WIN32
-    #define SAFE_SNPRINTF(buf, size, fmt, ...) _snprintf_s(buf, size, _TRUNCATE, fmt, __VA_ARGS__)
-#else
-    #define SAFE_SNPRINTF(buf, size, fmt, ...) snprintf(buf, size, fmt, __VA_ARGS__)
-#endif
-
 void RenderStandardJoinMenu(const StandardJoinMenuParams& p) {
     if (ImGui::BeginMenu("Game", p.placeId != 0)) {
         if (ImGui::MenuItem("Copy Place ID", nullptr, false, p.placeId != 0)) {
-            char buf[64];
-            SAFE_SNPRINTF(buf, sizeof(buf), "%llu", static_cast<unsigned long long>(p.placeId));
-            ImGui::SetClipboardText(buf);
+        	auto text = std::format("{}", p.placeId);
+            ImGui::SetClipboardText(text.c_str());
         }
         
         if (p.universeId != 0 && ImGui::MenuItem("Copy Universe ID")) {
-            char buf[64];
-            SAFE_SNPRINTF(buf, sizeof(buf), "%llu", static_cast<unsigned long long>(p.universeId));
-            ImGui::SetClipboardText(buf);
+        	auto text = std::format("{}", p.universeId);
+            ImGui::SetClipboardText(text.c_str());
         }
         
         if (ImGui::BeginMenu("Copy Launch Method")) {
-            char buf[512];
-            
             if (ImGui::MenuItem("Browser Link")) {
-                SAFE_SNPRINTF(buf, sizeof(buf), "https://www.roblox.com/games/start?placeId=%llu", 
-                    static_cast<unsigned long long>(p.placeId));
-                ImGui::SetClipboardText(buf);
+            	auto text = std::format("https://www.roblox.com/games/start?placeId={}", p.placeId);
+                ImGui::SetClipboardText(text.c_str());
             }
             
             if (ImGui::MenuItem("Deep Link")) {
-                SAFE_SNPRINTF(buf, sizeof(buf), "roblox://placeId=%llu", 
-                    static_cast<unsigned long long>(p.placeId));
-                ImGui::SetClipboardText(buf);
+            	auto text = std::format("roblox://placeId={}", p.placeId);
+                ImGui::SetClipboardText(text.c_str());
             }
             
             if (ImGui::MenuItem("JavaScript")) {
-                SAFE_SNPRINTF(buf, sizeof(buf), "Roblox.GameLauncher.joinGameInstance(%llu)", 
-                    static_cast<unsigned long long>(p.placeId));
-                ImGui::SetClipboardText(buf);
+            	auto text = std::format("Roblox.GameLauncher.joinGameInstance({})", p.placeId);
+                ImGui::SetClipboardText(text.c_str());
             }
             
             if (ImGui::MenuItem("Roblox Luau")) {
-                SAFE_SNPRINTF(buf, sizeof(buf), "game:GetService(\"TeleportService\"):Teleport(%llu)", 
-                    static_cast<unsigned long long>(p.placeId));
-                ImGui::SetClipboardText(buf);
+            	auto text = std::format("game:GetService(\"TeleportService\"):Teleport({})", p.placeId);
+                ImGui::SetClipboardText(text.c_str());
             }
             
             ImGui::EndMenu();
@@ -87,10 +73,8 @@ void RenderStandardJoinMenu(const StandardJoinMenuParams& p) {
             }
             
             if (ImGui::MenuItem("Deep Link")) {
-                char buf[512];
-                SAFE_SNPRINTF(buf, sizeof(buf), "roblox://placeId=%llu&gameInstanceId=%s", 
-                    static_cast<unsigned long long>(p.placeId), p.jobId.c_str());
-                ImGui::SetClipboardText(buf);
+            	auto text = std::format("roblox://placeId={}&gameInstanceId={}", p.placeId, p.jobId);
+                ImGui::SetClipboardText(text.c_str());
             }
             
             if (ImGui::MenuItem("JavaScript")) {

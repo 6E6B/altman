@@ -16,6 +16,7 @@
 #include "system/client_update_checker.h"
 #include "system/multi_instance.h"
 #include "thread_task.h"
+#include "utils/paths.h"
 
 namespace ClientManager {
 
@@ -288,7 +289,7 @@ bool DownloadInsertDylib(const std::string& outputPath, ProgressCallback progres
     const std::string url = "https://github.com/DollarNoob/Macsploit-Mirror/raw/main/insert_dylib";
 
     LOG_INFO("Downloading insert_dylib");
-#ifdef DISABLED_UNTIL_UPDATE_TO_UNIVERSAL
+#ifdef DISABLED_UNTIL_DOLLARNOOB_UPDATE_TO_UNIVERSAL
     auto progress_adapter = [progressCb](size_t downloaded, size_t total) {
         if (progressCb && total > 0) {
             const float percent = static_cast<float>(downloaded) / static_cast<float>(total);
@@ -321,7 +322,7 @@ bool DownloadInsertDylib(const std::string& outputPath, ProgressCallback progres
 bool DownloadDylib(const std::string& clientName, const std::string& outputPath,
                    ProgressCallback progressCb) {
     const std::string arch = GetHardwareArchitecture();
-    const std::string appDataDir = MultiInstance::getAppDataDirectory();
+	const auto appDataDir = AltMan::Paths::AppData();
 
     if (clientName == "MacSploit") {
         const std::string url = (arch == "aarch64")
@@ -369,7 +370,7 @@ bool DownloadDylib(const std::string& clientName, const std::string& outputPath,
         const std::string zipUrl = matches[1].str();
         LOG_INFO("Found {}.zip URL: {}", clientName, zipUrl);
 
-        const std::filesystem::path clientsDir = std::filesystem::path(appDataDir) / "clients";
+        const std::filesystem::path clientsDir = appDataDir / "clients";
         const std::filesystem::path zipPath = clientsDir / (clientName + ".zip");
         const std::filesystem::path appPath = clientsDir / (clientName + ".app");
 
@@ -523,13 +524,13 @@ void InstallClientAsync(const std::string& clientName,
                         ProgressCallback progressCb,
                         CompletionCallback completionCb) {
 	ThreadTask::fireAndForget([clientName, progressCb, completionCb]() {
-		const std::string appDataDir = MultiInstance::getAppDataDirectory();
+		const auto appDataDir = AltMan::Paths::AppData();
 		if (appDataDir.empty()) {
 			if (completionCb) completionCb(false, "Failed to get app data directory");
 			return;
 		}
 
-		const std::filesystem::path clientsDir = std::filesystem::path(appDataDir) / "clients";
+		const std::filesystem::path clientsDir = appDataDir/ "clients";
 		const std::filesystem::path finalAppPath = clientsDir / std::format("{}.app", clientName);
 
 		if (std::filesystem::exists(finalAppPath)) {
@@ -659,7 +660,7 @@ void InstallClientAsync(const std::string& clientName,
 		const std::filesystem::path binaryPath = executableDir / "RobloxPlayer";
 
 		if (clientName != "Default") {
-			const std::filesystem::path insertDylibPath = std::filesystem::path(appDataDir) / "insert_dylib";
+			const std::filesystem::path insertDylibPath = appDataDir / "insert_dylib";
 
 			if (!std::filesystem::exists(insertDylibPath)) {
 				if (progressCb) progressCb(0.65f, "Downloading insert_dylib...");

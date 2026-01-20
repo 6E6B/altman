@@ -13,6 +13,7 @@
 #include "version.h"
 #include "console/console.h"
 #include "utils/thread_task.h"
+#include "utils/paths.h"
 #include "network/http.h"
 #include "utils/thread_task.h"
 #include "ui/widgets/modal_popup.h"
@@ -26,28 +27,13 @@
         #include <mach-o/dyld.h>
 		#include <Security/Security.h>
 		#include <CoreFoundation/CoreFoundation.h>
+		#include <spawn.h>
+		extern char **environ;
     #endif
 #endif
 
 std::filesystem::path UpdaterConfig::GetConfigPath() {
-    std::filesystem::path path;
-
-#ifdef _WIN32
-    if (const char* appdata = std::getenv("APPDATA")) {
-        path = std::filesystem::path(appdata) / "AltMan" / "updater.json";
-    }
-#else
-    if (const char* home = std::getenv("HOME")) {
-#ifdef __APPLE__
-        path = std::filesystem::path(home) / "Library" / "Application Support" / "Altman" / "storage" / "updater.json";
-#else
-        path = std::filesystem::path(home) / ".config" / "AltMan" / "updater.json";
-#endif
-    }
-#endif
-
-    std::filesystem::create_directories(path.parent_path());
-    return path;
+	return AltMan::Paths::Config("updater.json");
 }
 
 void UpdaterConfig::Save() const {
@@ -139,27 +125,6 @@ std::string AutoUpdater::GetDeltaAssetName(std::string_view fromVersion, std::st
     return std::format("AltMan-Delta-{}-to-{}{}", fromVersion, toVersion, extension);
 }
 
-std::filesystem::path AutoUpdater::GetBackupPath() {
-    std::filesystem::path path;
-
-#ifdef _WIN32
-    if (const char* appdata = std::getenv("APPDATA")) {
-        path = std::filesystem::path(appdata) / "AltMan" / "backups";
-    }
-#else
-    if (const char* home = std::getenv("HOME")) {
-#ifdef __APPLE__
-        path = std::filesystem::path(home) / "Library" / "Application Support" / "Altman" / "backups";
-#else
-        path = std::filesystem::path(home) / ".local" / "share" / "AltMan" / "backups";
-#endif
-    }
-#endif
-
-    std::filesystem::create_directories(path);
-    return path;
-}
-
 std::filesystem::path AutoUpdater::GetUpdateScriptPath() {
 #ifdef _WIN32
     return std::filesystem::temp_directory_path() / "update_altman.bat";
@@ -226,10 +191,48 @@ void AutoUpdater::LaunchUpdateScript() {
     const auto scriptPath = GetUpdateScriptPath();
 
 #ifdef _WIN32
-    ShellExecuteW(nullptr, L"open", scriptPath.c_str(), nullptr, nullptr, SW_HIDE);
+	std::wstring cmdLine = L"cmd.exe /C \"" + scriptPath.wstring() + L"\"";
+
+	STARTUPINFOW si{};
+	PROCESS_INFORMATION pi{};
+	si.cb = sizeof(si);
+	si.dwFlags = STARTF_USESHOWWINDOW;
+	si.wShowWindow = SW_HIDE;
+
+	if (!CreateProcessW(
+		nullptr,
+		cmdLine.data(),
+		nullptr,
+		nullptr,
+		FALSE,
+		CREATE_NO_WINDOW,
+		nullptr,
+		nullptr,
+		&si,
+		&pi
+	)) {
+		return;
+	}
+
+	CloseHandle(pi.hProcess);
+	CloseHandle(pi.hThread);
 #else
-    const auto command = std::format("\"{}\" &", scriptPath.string());
-    std::system(command.c_str());
+	pid_t pid;
+	std::string path = scriptPath.string();
+	char* argv[] = {
+		const_cast<char*>(path.c_str()),
+		nullptr
+	};
+
+	if (posix_spawn(
+			&pid,
+			path.c_str(),
+			nullptr,
+			nullptr,
+			argv,
+			environ
+		) != 0) {
+		}
 #endif
 }
 
@@ -742,7 +745,7 @@ bool AutoUpdater::DownloadFileWithResume(std::string_view url, const std::filesy
 
 void AutoUpdater::InstallUpdate(const std::filesystem::path& updatePath) {
     const auto currentExe = GetCurrentExecutablePath();
-    auto backupPath = GetBackupPath() / std::format("altman_v{}_backup", APP_VERSION);
+	auto backupPath = AltMan::Paths::BackupFile(std::format("altman_v{}_backup", APP_VERSION));
 
 #ifdef _WIN32
     backupPath.replace_extension(".exe");
@@ -792,7 +795,9 @@ void AutoUpdater::RollbackToPreviousVersion() {
 }
 
 void AutoUpdater::CleanupOldBackups(int keepCount) {
-    const auto backupDir = GetBackupPath();
+	const auto backupDir = AltMan::Paths::Backups();
+
+
     std::vector<std::filesystem::path> backups;
 
     for (const auto& entry : std::filesystem::directory_iterator(backupDir)) {

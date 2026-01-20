@@ -26,6 +26,7 @@
 #include "system/multi_instance.h"
 #include "system/roblox_control.h"
 #include "utils/thread_task.h"
+#include "utils/paths.h"
 #include "ui/widgets/modal_popup.h"
 #include "ui/webview/webview.h"
 
@@ -412,9 +413,7 @@ bool RenderMainMenu() {
     if (ImGui::BeginPopupModal("ImportBackup", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         if (s_refreshBackupList) {
             s_backupFiles.clear();
-            const std::filesystem::path dir = Data::StorageFilePath("backups");
-            std::error_code ec;
-            std::filesystem::create_directories(dir, ec);
+        	const auto dir = AltMan::Paths::Backups();
 
             for (const auto& entry : std::filesystem::directory_iterator(dir)) {
                 if (entry.is_regular_file()) {
@@ -452,10 +451,8 @@ bool RenderMainMenu() {
             std::string err;
             bool ok = false;
             if (!s_backupFiles.empty()) {
-                const std::string path = Data::StorageFilePath(
-                    std::format("backups/{}", s_backupFiles[s_selectedBackup])
-                );
-                ok = Backup::Import(path, s_importPassword, &err);
+            	const auto dir = AltMan::Paths::BackupFile(s_backupFiles[s_selectedBackup]);
+                ok = Backup::Import(dir.string(), s_importPassword, &err);
             }
             if (ok) {
                 ModalPopup::AddInfo("Import completed.");

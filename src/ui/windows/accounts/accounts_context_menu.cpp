@@ -1,4 +1,3 @@
-#define CRT_SECURE_NO_WARNINGS
 #include "accounts_context_menu.h"
 
 #ifdef _WIN32
@@ -6,7 +5,6 @@
     #include <wrl.h>
     #include <wil/com.h>
     #include <dwmapi.h>
-    #pragma comment(lib, "Dwmapi.lib")
     using Microsoft::WRL::Callback;
     using Microsoft::WRL::ComPtr;
 #endif
@@ -107,10 +105,10 @@
             std::chrono::system_clock::now().time_since_epoch()).count();
         
         std::string placeLauncherUrl = std::format(
-            "https://assetgame.roblox.com/game/PlaceLauncher.ashx?request=RequestGame%26placeId={}", placeId);
+            "https://assetgame.roblox.com/game/PlaceLauncher.ashx?request=RequestGame&placeId={}", placeId);
         
         if (!jobId.empty()) {
-            placeLauncherUrl += std::format("%26gameId={}", jobId);
+            placeLauncherUrl += std::format("&gameId={}", jobId);
         }
 
         return std::format(
@@ -638,7 +636,9 @@ void RenderAccountContextMenu(AccountData& account, const std::string& uniqueCon
 
 					for (const int id : idsToRemove) {
 						if (const AccountData* acc = getAccountById(id)) {
+#ifdef __APPLE__
 							MultiInstance::cleanupUserEnvironment(acc->username);
+#endif
 						}
 					}
 
@@ -663,9 +663,11 @@ void RenderAccountContextMenu(AccountData& account, const std::string& uniqueCon
 				std::format("Delete {}?", account.displayName),
 				[id = account.id, displayName = account.displayName, username = account.username]() {
 					LOG_INFO("Attempting to delete account: {} (ID: {})", displayName, id);
+#ifdef  __APPLE__
 					if (!MultiInstance::cleanupUserEnvironment(username)) {
 						LOG_WARN("Environment cleanup failed for " + username);
 					}
+#endif
 					std::erase_if(g_accounts, [id](const auto& acc) { return acc.id == id; });
 					invalidateAccountIndex();
 					g_selectedAccountIds.erase(id);

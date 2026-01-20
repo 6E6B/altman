@@ -1,4 +1,3 @@
-#include "network/ipa_installer.h"
 #include "settings.h"
 #include <algorithm>
 #include <array>
@@ -16,10 +15,16 @@
 #include "components/data.h"
 #include "system/multi_instance.h"
 #include "console/console.h"
+#include "utils/paths.h"
+
+#ifdef __APPLE__
+#include "network/ipa_installer.h"
 #include "network/client_manager.h"
+#endif
 
 static bool g_requestOpenConsoleModal = false;
 
+#ifdef __APPLE__
 static constexpr std::array<std::string_view, 4> g_availableClientsNames = {
     "Default",
     "MacSploit",
@@ -39,11 +44,11 @@ static std::mutex g_installMutex;
 
 namespace {
 	void OpenAccountDocumentsFolder(const AccountData& acc) {
-		const std::string appDataDir = MultiInstance::getAppDataDirectory();
+		const auto appDataDir = AltMan::Paths::AppData();
 		if (appDataDir.empty()) return;
 
 		const std::string documentsPath = std::format("{}/environments/{}/Documents",
-													  appDataDir, acc.username);
+													  appDataDir.string(), acc.username);
 
 		std::error_code ec;
 		if (!std::filesystem::exists(documentsPath, ec)) {
@@ -62,10 +67,10 @@ namespace {
 	}
 
 	void OpenAccountEnvironmentFolder(const AccountData& acc) {
-		const std::string appDataDir = MultiInstance::getAppDataDirectory();
+		const auto appDataDir = AltMan::Paths::AppData();
 		if (appDataDir.empty()) return;
 
-		const std::string envPath = std::format("{}/environments/{}", appDataDir, acc.username);
+		const std::string envPath = std::format("{}/environments/{}", appDataDir.string(), acc.username);
 
 		std::error_code ec;
 		if (!std::filesystem::exists(envPath, ec)) {
@@ -158,6 +163,7 @@ namespace {
 		}
 	}
 }
+#endif // __APPLE__
 
 void RenderSettingsTab() {
 	ImGui::BeginChild("SettingsScrollRegion", ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_AlwaysVerticalScrollbar);
@@ -216,6 +222,8 @@ void RenderSettingsTab() {
 	}
 
 	ImGui::Spacing();
+
+#ifdef __APPLE__
 	ImGui::SeparatorText("Selected Account Settings");
 
 	if (g_selectedAccountIds.empty()) {
@@ -241,6 +249,8 @@ void RenderSettingsTab() {
 	}
 
 	ImGui::Spacing();
+#endif // __APPLE__
+
 	ImGui::SeparatorText("General");
 
 	int interval = g_statusRefreshInterval;
@@ -290,6 +300,7 @@ void RenderSettingsTab() {
 
 	ImGui::EndDisabled();
 
+#ifdef __APPLE__
 	ImGui::Spacing();
 	ImGui::SeparatorText("Client Management");
 
@@ -469,6 +480,7 @@ void RenderSettingsTab() {
 			ImGui::TextWrapped("%s", g_installState.statusMessage.c_str());
 		}
 	}
+#endif // __APPLE__
 
 	ImGui::EndChild();
 

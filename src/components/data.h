@@ -87,6 +87,4 @@ namespace Data {
 
     void LoadFriends(std::string_view filename = "friends.json");
     void SaveFriends(std::string_view filename = "friends.json");
-
-    std::string StorageFilePath(std::string_view filename);
 }

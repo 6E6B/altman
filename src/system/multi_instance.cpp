@@ -1,7 +1,10 @@
 #include "multi_instance.h"
 
 #ifdef _WIN32
+#include <filesystem>
 #include <windows.h>
+#include <shlobj.h>
+#include "console/console.h"
 
 namespace MultiInstance {
     namespace {
@@ -43,6 +46,7 @@ namespace MultiInstance {
 #include <format>
 
 #include "console/console.h"
+#include "utils/paths.h"
 
 extern char** environ;
 
@@ -86,31 +90,12 @@ namespace MultiInstance {
         return {WEXITSTATUS(exitCode), result};
     }
 
-    std::string getAppDataDirectory() {
-        const char* home = getenv("HOME");
-        if (!home) {
-            LOG_ERROR("Failed to get HOME directory");
-            return "";
-        }
-
-        std::filesystem::path appDataDir = std::filesystem::path(home) / "Library" / "Application Support" / "Altman";
-
-        std::error_code ec;
-        std::filesystem::create_directories(appDataDir, ec);
-        if (ec) {
-            LOG_ERROR("Failed to create app data directory: {}", ec.message());
-            return "";
-        }
-
-        return appDataDir.string();
-    }
-
     std::string getUserClientPath(const std::string& username, const std::string& clientName) {
-        std::string appDataDir = getAppDataDirectory();
+        auto appDataDir = AltMan::Paths::AppData();
         if (appDataDir.empty()) return "";
 
         return std::format("{}/environments/{}/Applications/{}.app",
-            appDataDir, username, clientName);
+            appDataDir.string(), username, clientName);
     }
 
     namespace {
@@ -457,10 +442,10 @@ namespace MultiInstance {
     }
 
     bool cleanupUserEnvironment(const std::string& username) {
-        std::string appDataDir = getAppDataDirectory();
+    	auto appDataDir = AltMan::Paths::AppData();
         if (appDataDir.empty()) return false;
 
-        std::filesystem::path userEnvPath = std::filesystem::path(appDataDir) / "environments" / username;
+        std::filesystem::path userEnvPath = appDataDir / "environments" / username;
 
         if (!std::filesystem::exists(userEnvPath)) {
             return true;
@@ -483,10 +468,10 @@ namespace MultiInstance {
     }
 
     bool isBaseClientInstalled(const std::string& clientName) {
-        std::string appDataDir = getAppDataDirectory();
+    	auto appDataDir = AltMan::Paths::AppData();
         if (appDataDir.empty()) return false;
 
-        std::filesystem::path clientPath = std::filesystem::path(appDataDir) / "clients" / (clientName + ".app");
+        std::filesystem::path clientPath = appDataDir / "clients" / (clientName + ".app");
         return std::filesystem::exists(clientPath);
     }
 
@@ -498,10 +483,10 @@ namespace MultiInstance {
 
     	std::lock_guard<std::mutex> lock(m);
 
-    	std::string appDataDir = getAppDataDirectory();
+    	auto appDataDir = AltMan::Paths::AppData();
     	if (appDataDir.empty()) return cached;
 
-    	std::filesystem::path clientsDir = std::filesystem::path(appDataDir) / "clients";
+    	std::filesystem::path clientsDir = appDataDir / "clients";
 
     	std::error_code ec;
     	bool exists = std::filesystem::exists(clientsDir, ec);
@@ -551,7 +536,7 @@ namespace MultiInstance {
     }
 
     std::string getBaseClientPath(const std::string& clientName) {
-        std::string appDataDir = getAppDataDirectory();
+    	auto appDataDir = AltMan::Paths::AppData();
         if (appDataDir.empty()) return "";
 
         std::string baseClientName = clientName;
@@ -559,15 +544,15 @@ namespace MultiInstance {
             baseClientName = "Default";
         }
 
-        return std::format("{}/clients/{}.app", appDataDir, baseClientName);
+        return std::format("{}/clients/{}.app", appDataDir.string(), baseClientName);
     }
 
 	bool createKeychain(const std::string& profileId) {
-    	std::string appDataDir = getAppDataDirectory();
+    	auto appDataDir = AltMan::Paths::AppData();
     	if (appDataDir.empty())
     		return false;
 
-    	auto profileDir = std::filesystem::path(appDataDir) / "environments" / profileId;
+    	auto profileDir = appDataDir / "environments" / profileId;
 
     	auto keychainDir = profileDir / "Library" / "Keychains";
     	std::error_code ec;
@@ -586,11 +571,11 @@ namespace MultiInstance {
     }
 
 	bool unlockKeychain(const std::string& profileId) {
-    	std::string appDataDir = getAppDataDirectory();
+    	auto appDataDir = AltMan::Paths::AppData();
     	if (appDataDir.empty())
     		return false;
 
-    	auto profileDir = std::filesystem::path(appDataDir) / "environments" / profileId;
+    	auto profileDir = appDataDir / "environments" / profileId;
 
     	auto keychainPath = profileDir / "Library" / "Keychains" / "login.keychain-db";
 
@@ -607,10 +592,10 @@ namespace MultiInstance {
     }
 
     bool createProfileEnvironment(const std::string& profileId, std::string& profilePath) {
-        std::string appDataDir = getAppDataDirectory();
+    	auto appDataDir = AltMan::Paths::AppData();
         if (appDataDir.empty()) return false;
 
-        std::filesystem::path environmentsDir = std::filesystem::path(appDataDir) / "environments" / profileId;
+        std::filesystem::path environmentsDir = appDataDir / "environments" / profileId;
 
         std::error_code ec;
         std::filesystem::create_directories(environmentsDir, ec);
@@ -741,16 +726,16 @@ namespace MultiInstance {
             return false;
         }
 
-        std::string appDataDir = getAppDataDirectory();
+    	auto appDataDir = AltMan::Paths::AppData();
         if (appDataDir.empty()) return false;
 
         std::string keyPath;
         if (clientName == "Hydrogen") {
             keyPath = std::format("{}/environments/{}/Library/Application Support/Hydrogen/Key.txt",
-                appDataDir, username);
+                appDataDir.string(), username);
         } else if (clientName == "Delta") {
             keyPath = std::format("{}/environments/{}/Library/Delta/Cache/license",
-                appDataDir, username);
+                appDataDir.string(), username);
         } else {
             return true;
         }

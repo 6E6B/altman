@@ -34,10 +34,10 @@ namespace IPAInstaller {
 	bool ConvertPlist(const std::filesystem::path& path, ProgressCallback progressCb);
 	bool ModifyPlist(const std::filesystem::path& plistPath, ProgressCallback progressCb);
 
-	bool InstallIPA(const std::string& appDataDir, const std::string& client,
+	bool InstallIPA(const std::filesystem::path& appDataDir, const std::string& client,
 					const std::string& version, ProgressCallback progressCb);
 
-	void InstallIPAAsync(const std::string& appDataDir, const std::string& client,
+	void InstallIPAAsync(const std::filesystem::path& appDataDir, const std::string& client,
 						 const std::string& version, ProgressCallback progressCb,
 						 CompletionCallback completionCb);
 

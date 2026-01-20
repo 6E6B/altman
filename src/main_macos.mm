@@ -1,4 +1,5 @@
 #define STB_IMAGE_IMPLEMENTATION
+
 #import <Cocoa/Cocoa.h>
 #import <Metal/Metal.h>
 #import <MetalKit/MetalKit.h>
@@ -156,32 +157,28 @@ std::expected<TextureLoadResult, std::string> LoadTextureFromMemory(const void* 
 }
 
 [[nodiscard]]
-std::expected<TextureLoadResult, std::string> LoadTextureFromFile(const char* file_name) {
-    FILE* f = std::fopen(file_name, "rb");
-    if (!f) {
-        return std::unexpected(std::format("Failed to open file: {}", file_name));
+std::expected<TextureLoadResult, std::string> LoadTextureFromFile(const char* fileName)
+{
+    std::ifstream file(fileName, std::ios::binary | std::ios::ate);
+    if (!file) {
+        return std::unexpected(std::format("Failed to open file: {}", fileName));
     }
 
-    auto fileCleanup = std::unique_ptr<FILE, decltype(&std::fclose)>(f, std::fclose);
-
-    std::fseek(f, 0, SEEK_END);
-    const long file_pos = std::ftell(f);
-    if (file_pos < 0) {
+    const std::streamsize fileSize = file.tellg();
+    if (fileSize <= 0) {
         return std::unexpected("Failed to determine file size");
     }
 
-    const size_t file_size = static_cast<size_t>(file_pos);
-    std::fseek(f, 0, SEEK_SET);
+    file.seekg(0, std::ios::beg);
 
-    std::vector<char> file_data(file_size);
-    const size_t read_size = std::fread(file_data.data(), 1, file_size, f);
-
-    if (read_size != file_size) {
-        return std::unexpected(std::format("Failed to read file: expected {} bytes, got {}",
-                                           file_size, read_size));
+    std::vector<char> fileData(static_cast<size_t>(fileSize));
+    if (!file.read(fileData.data(), fileSize)) {
+        return std::unexpected(std::format(
+            "Failed to read file: expected {} bytes", fileSize));
     }
 
-    return LoadTextureFromMemory(file_data.data(), file_size);
+    return LoadTextureFromMemory(fileData.data(),
+                                 static_cast<size_t>(fileSize));
 }
 
 namespace AccountProcessor {

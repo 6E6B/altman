@@ -7,6 +7,7 @@
 #include "network/roblox/session.h"
 #include "network/roblox/social.h"
 #include "utils/thread_task.h"
+#include "utils/paths.h"
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -45,16 +46,6 @@ std::string rleDecompress(const std::string &data) {
     return out;
 }
 
-std::filesystem::path getBackupDir() {
-    std::filesystem::path dir = Data::StorageFilePath("backups");
-    std::error_code ec;
-    std::filesystem::create_directories(dir, ec);
-    if (ec) {
-        LOG_ERROR("Failed to create backups directory: ", ec.message());
-    }
-    return dir;
-}
-
 std::string buildBackupPath() {
     std::time_t t = std::time(nullptr);
     std::tm tm{};
@@ -65,7 +56,7 @@ std::string buildBackupPath() {
 #endif
     char buf[64];
     std::strftime(buf, sizeof(buf), "%Y-%m-%d-backup.dat", &tm);
-    auto path = getBackupDir() / buf;
+    auto path = AltMan::Paths::Backups() / buf;
     return path.string();
 }
 }
@@ -74,7 +65,7 @@ bool Backup::Export(const std::string &password) {
     nlohmann::json j;
     // settings
     {
-        std::ifstream in(Data::StorageFilePath("settings.json"));
+        std::ifstream in(AltMan::Paths::Config("settings.json"));
         if (in.is_open())
             in >> j["settings"];
         else
@@ -93,7 +84,8 @@ bool Backup::Export(const std::string &password) {
     j["accounts"] = std::move(accounts);
     // favorites
     {
-        std::ifstream in(Data::StorageFilePath("favorites.json"));
+
+        std::ifstream in(AltMan::Paths::Config("favorites.json"));
         if (in.is_open())
             in >> j["favorites"];
         else
@@ -168,11 +160,11 @@ bool Backup::Import(const std::string &file, const std::string &password, std::s
 	invalidateAccountIndex();
 
     if (j.contains("settings")) {
-        std::ofstream s(Data::StorageFilePath("settings.json"));
+        std::ofstream s(AltMan::Paths::Config("settings.json"));
         s << j["settings"].dump(4);
     }
     if (j.contains("favorites")) {
-        std::ofstream f(Data::StorageFilePath("favorites.json"));
+        std::ofstream f(AltMan::Paths::Config("favorites.json"));
         f << j["favorites"].dump(4);
     }
     Data::SaveAccounts();

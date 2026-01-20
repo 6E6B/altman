@@ -5,4 +5,4 @@
 
 void parseLogFile(LogInfo &logInfo);
 
-std::string logsFolder();
+std::filesystem::path GetLogsFolder();

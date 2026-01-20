@@ -1,4 +1,3 @@
-#define _CRT_SECURE_NO_WARNINGS
 #include <unordered_map>
 #include <unordered_set>
 #include <imgui.h>

@@ -23,6 +23,8 @@ BanInfo checkBanStatus(const std::string& cookie) {
         {{"Cookie", ".ROBLOSECURITY=" + cookie}}
     );
 
+	LOG_INFO("cookie {}", cookie);
+
 	if (response.status_code < 200 || response.status_code >= 300) {
 		LOG_ERROR("Failed moderation check: HTTP {}", response.status_code);
 

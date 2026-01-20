@@ -43,9 +43,9 @@ std::string GetHardwareArchitecture() {
     return "x86_64";
 }
 
-bool DownloadPackage(const std::string& appDataDir, const std::string& url,
+bool DownloadPackage(const std::filesystem::path& appDataDir, const std::string& url,
                      const std::string& client, ProgressCallback progressCb) {
-    const std::filesystem::path clientsDir = std::filesystem::path(appDataDir) / "clients";
+    const std::filesystem::path clientsDir = appDataDir / "clients";
 
     std::error_code ec;
     std::filesystem::create_directories(clientsDir, ec);
@@ -464,7 +464,7 @@ bool ModifyPlist(const std::filesystem::path& plistPath, ProgressCallback progre
     return true;
 }
 
-bool InstallIPA(const std::string& appDataDir, const std::string& client,
+bool InstallIPA(const std::filesystem::path& appDataDir, const std::string& client,
                 const std::string& version, ProgressCallback progressCb) {
     const std::string arch = GetHardwareArchitecture();
     if (arch != "aarch64") {
@@ -635,7 +635,7 @@ bool InstallIPA(const std::string& appDataDir, const std::string& client,
     return true;
 }
 
-void InstallIPAAsync(const std::string& appDataDir, const std::string& client,
+void InstallIPAAsync(const std::filesystem::path& appDataDir, const std::string& client,
                      const std::string& version, ProgressCallback progressCb,
                      CompletionCallback completionCb) {
     std::thread([appDataDir, client, version, progressCb, completionCb]() {

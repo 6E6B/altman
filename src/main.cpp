@@ -1,99 +1,184 @@
-﻿#define ICON_MIN_FA 0xf000
-#define ICON_MAX_16_FA 0xf3ff
-#define ICON_MIN_BRANDS_FA 0xf300
-#define ICON_MAX_BRANDS_FA 0xf3ff
-#define IDI_ICON_32 102
-
-#define _CRT_SECURE_NO_WARNINGS
+﻿#define IDI_ICON_32 102
 #define STB_IMAGE_IMPLEMENTATION
+
+#include <windows.h>
+#include <dwmapi.h>
+#include <shellscalingapi.h>
+#include <objbase.h>
+#include <d3d11.h>
+
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstdio>
+#include <format>
+#include <memory>
+#include <mutex>
+#include <print>
+#include <ranges>
+#include <shared_mutex>
+#include <string>
+#include <thread>
+#include <expected>
 
 #include "imgui.h"
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx11.h"
-#include "stb_image.h"
-#include <d3d11.h>
-#include <tchar.h>
-#include "../ui.h"
-#include <dwmapi.h>
-#include <objbase.h>
+#include "utils/stb_image.h"
 
+#include "ui/ui.h"
 #include "components/data.h"
-#include "network/roblox.h"
-#include "ui/notifications.h"
-#include "core/logging.hpp"
-#include "ui/confirm.h"
-#include "system/main_thread.h"
-#include "system/update.h"
-#include <cstdio>
-#include <thread>
-#include <chrono>
-#include <algorithm>
+#include "network/roblox/common.h"
+#include "network/roblox/auth.h"
+#include "network/roblox/games.h"
+#include "network/roblox/session.h"
+#include "network/roblox/social.h"
+#include "ui/widgets/notifications.h"
+#include "ui/widgets/modal_popup.h"
+#include "utils/thread_task.h"
+#include "system/auto_updater.h"
+#include "console/console.h"
+#include "image.h"
 
-#include <windows.h>
+#include "assets/fonts/embedded_rubik.h"
+#include "assets/fonts/embedded_fa_solid.h"
 
-HWND Notifications::g_appHWnd = NULL;
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-#pragma comment(lib, "Dwmapi.lib")
-#pragma comment(lib, "Ole32.lib")
-#pragma comment(lib, "Shcore.lib")
+namespace {
 
-static ID3D11Device *g_pd3dDevice = nullptr;
-static ID3D11DeviceContext *g_pd3dDeviceContext = nullptr;
-static IDXGISwapChain *g_pSwapChain = nullptr;
-static bool g_SwapChainOccluded = false;
-static UINT g_ResizeWidth = 0, g_ResizeHeight = 0;
-static ID3D11RenderTargetView *g_mainRenderTargetView = nullptr;
+ID3D11Device* g_pd3dDevice = nullptr;
+ID3D11DeviceContext* g_pd3dDeviceContext = nullptr;
+IDXGISwapChain* g_pSwapChain = nullptr;
+ID3D11RenderTargetView* g_mainRenderTargetView = nullptr;
+bool g_swapChainOccluded = false;
+UINT g_resizeWidth = 0;
+UINT g_resizeHeight = 0;
 
-// DPI handling globals
-static float g_currentDPIScale = 1.0f;
-static ImFont *g_rubikFont = nullptr;
-static ImFont *g_iconFont = nullptr;
+ImFont* g_rubikFont = nullptr;
+ImFont* g_iconFont = nullptr;
+float g_currentDPIScale = 1.0f;
 
-bool CreateDeviceD3D(HWND hWnd);
+constexpr ImWchar ICON_MIN_FA = 0xf000;
+constexpr ImWchar ICON_MAX_16_FA = 0xf3ff;
+constexpr float BASE_FONT_SIZE = 16.0f;
 
-void CleanupDeviceD3D();
+std::mutex g_selectionMutex;
+std::shared_mutex g_accountsMutex;
+std::atomic<bool> g_running = true;
 
-void CreateRenderTarget();
-
-void CleanupRenderTarget();
-
+[[nodiscard]]
 float GetDPIScale(HWND hwnd) {
-    const UINT dpi = GetDpiForWindow(hwnd);
-    return dpi / 96.0f;
+    UINT dpi = GetDpiForWindow(hwnd);
+    return static_cast<float>(dpi) / 96.0f;
+}
+
+void CreateRenderTarget() {
+    ID3D11Texture2D* pBackBuffer = nullptr;
+    g_pSwapChain->GetBuffer(0, IID_PPV_ARGS(&pBackBuffer));
+    if (pBackBuffer) {
+        g_pd3dDevice->CreateRenderTargetView(pBackBuffer, nullptr, &g_mainRenderTargetView);
+        pBackBuffer->Release();
+    }
+}
+
+void CleanupRenderTarget() {
+    if (g_mainRenderTargetView) {
+        g_mainRenderTargetView->Release();
+        g_mainRenderTargetView = nullptr;
+    }
+}
+
+bool CreateDeviceD3D(HWND hWnd) {
+    DXGI_SWAP_CHAIN_DESC sd{};
+    sd.BufferCount = 2;
+    sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    sd.BufferDesc.RefreshRate.Numerator = 60;
+    sd.BufferDesc.RefreshRate.Denominator = 1;
+    sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+    sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    sd.OutputWindow = hWnd;
+    sd.SampleDesc.Count = 1;
+    sd.Windowed = TRUE;
+    sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+
+    constexpr D3D_FEATURE_LEVEL featureLevels[] = {
+        D3D_FEATURE_LEVEL_11_0,
+        D3D_FEATURE_LEVEL_10_0,
+    };
+
+    D3D_FEATURE_LEVEL featureLevel;
+    HRESULT hr = D3D11CreateDeviceAndSwapChain(
+        nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0,
+        featureLevels, 2, D3D11_SDK_VERSION,
+        &sd, &g_pSwapChain, &g_pd3dDevice, &featureLevel, &g_pd3dDeviceContext
+    );
+
+    if (hr == DXGI_ERROR_UNSUPPORTED) {
+        hr = D3D11CreateDeviceAndSwapChain(
+            nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0,
+            featureLevels, 2, D3D11_SDK_VERSION,
+            &sd, &g_pSwapChain, &g_pd3dDevice, &featureLevel, &g_pd3dDeviceContext
+        );
+    }
+
+    if (FAILED(hr)) return false;
+
+    CreateRenderTarget();
+    return true;
+}
+
+void CleanupDeviceD3D() {
+    CleanupRenderTarget();
+    if (g_pSwapChain) { g_pSwapChain->Release(); g_pSwapChain = nullptr; }
+    if (g_pd3dDeviceContext) { g_pd3dDeviceContext->Release(); g_pd3dDeviceContext = nullptr; }
+    if (g_pd3dDevice) { g_pd3dDevice->Release(); g_pd3dDevice = nullptr; }
 }
 
 void ReloadFonts(float dpiScale) {
-    ImGuiIO &io = ImGui::GetIO();
+    ImGuiIO& io = ImGui::GetIO();
     io.Fonts->Clear();
-    float baseFontSize = 16.0f * dpiScale;
-    float iconFontSize = 13.0f * dpiScale;
 
-    // Load main font
-    g_rubikFont = io.Fonts->AddFontFromFileTTF("assets/fonts/rubik-regular.ttf", baseFontSize);
+    const float scaledFontSize = BASE_FONT_SIZE * dpiScale;
+
+    ImFontConfig rubikCfg{};
+    rubikCfg.FontDataOwnedByAtlas = false;
+    g_rubikFont = io.Fonts->AddFontFromMemoryTTF(
+        const_cast<void*>(static_cast<const void*>(EmbeddedFonts::rubik_regular_ttf)),
+        sizeof(EmbeddedFonts::rubik_regular_ttf),
+        scaledFontSize,
+        &rubikCfg
+    );
+
     if (!g_rubikFont) {
         LOG_ERROR("Failed to load rubik-regular.ttf font.");
         g_rubikFont = io.Fonts->AddFontDefault();
     }
 
-    // Load icon font
-    ImFontConfig iconCfg;
+    ImFontConfig iconCfg{};
     iconCfg.MergeMode = true;
     iconCfg.PixelSnapH = true;
-    static constexpr ImWchar fa_solid_ranges[] = {ICON_MIN_FA, ICON_MAX_16_FA, 0};
-    g_iconFont = io.Fonts->AddFontFromFileTTF(
-        "assets/fonts/fa-solid.ttf",
-        iconFontSize,
+    iconCfg.FontDataOwnedByAtlas = false;
+    iconCfg.GlyphMinAdvanceX = scaledFontSize;
+
+    static constexpr ImWchar fa_solid_ranges[] = { ICON_MIN_FA, ICON_MAX_16_FA, 0 };
+    g_iconFont = io.Fonts->AddFontFromMemoryTTF(
+        const_cast<void*>(static_cast<const void*>(EmbeddedFonts::fa_solid_ttf)),
+        sizeof(EmbeddedFonts::fa_solid_ttf),
+        scaledFontSize,
         &iconCfg,
-        fa_solid_ranges);
+        fa_solid_ranges
+    );
+
     if (!g_iconFont && g_rubikFont) {
         LOG_ERROR("Failed to load fa-solid.ttf font for icons.");
     }
+
     io.FontDefault = g_rubikFont;
 
-    ImGuiStyle &style = ImGui::GetStyle();
+    ImGuiStyle& style = ImGui::GetStyle();
     style = ImGuiStyle();
     ImGui::StyleColorsDark();
-
     style.ScaleAllSizes(dpiScale);
 
     io.Fonts->Build();
@@ -104,288 +189,420 @@ void ReloadFonts(float dpiScale) {
     }
 }
 
+}
 
-bool LoadTextureFromMemory(const void *data, size_t data_size, ID3D11ShaderResourceView **out_srv, int *out_width,
-                           int *out_height) {
-    // Load from disk into a raw RGBA buffer
-    int image_width = 0;
-    int image_height = 0;
-    unsigned char *image_data = stbi_load_from_memory((const unsigned char *) data, (int) data_size, &image_width,
-                                                      &image_height, NULL, 4);
-    if (image_data == NULL)
-        return false;
+[[nodiscard]]
+std::expected<TextureLoadResult, std::string> LoadTextureFromMemory(const void* data, size_t dataSize) {
+    int imageWidth = 0;
+    int imageHeight = 0;
+    unsigned char* imageData = stbi_load_from_memory(
+        static_cast<const unsigned char*>(data),
+        static_cast<int>(dataSize),
+        &imageWidth,
+        &imageHeight,
+        nullptr,
+        4
+    );
 
-    // Create texture
-    D3D11_TEXTURE2D_DESC desc;
-    ZeroMemory(&desc, sizeof(desc));
-    desc.Width = image_width;
-    desc.Height = image_height;
+    if (!imageData) {
+        return std::unexpected("Failed to decode image data");
+    }
+
+    auto imageDataCleanup = std::unique_ptr<unsigned char, decltype(&stbi_image_free)>(
+        imageData, stbi_image_free
+    );
+
+    D3D11_TEXTURE2D_DESC desc{};
+    desc.Width = static_cast<UINT>(imageWidth);
+    desc.Height = static_cast<UINT>(imageHeight);
     desc.MipLevels = 1;
     desc.ArraySize = 1;
     desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     desc.SampleDesc.Count = 1;
     desc.Usage = D3D11_USAGE_DEFAULT;
     desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-    desc.CPUAccessFlags = 0;
 
-    ID3D11Texture2D *pTexture = NULL;
-    D3D11_SUBRESOURCE_DATA subResource;
-    subResource.pSysMem = image_data;
-    subResource.SysMemPitch = desc.Width * 4;
-    subResource.SysMemSlicePitch = 0;
-    g_pd3dDevice->CreateTexture2D(&desc, &subResource, &pTexture);
+    D3D11_SUBRESOURCE_DATA subResource{};
+    subResource.pSysMem = imageData;
+    subResource.SysMemPitch = static_cast<UINT>(imageWidth) * 4;
 
-    // Create texture view
-    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc;
-    ZeroMemory(&srvDesc, sizeof(srvDesc));
+    ID3D11Texture2D* pTexture = nullptr;
+    HRESULT hr = g_pd3dDevice->CreateTexture2D(&desc, &subResource, &pTexture);
+    if (FAILED(hr) || !pTexture) {
+        return std::unexpected("Failed to create D3D11 texture");
+    }
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
     srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-    srvDesc.Texture2D.MipLevels = desc.MipLevels;
-    srvDesc.Texture2D.MostDetailedMip = 0;
-    g_pd3dDevice->CreateShaderResourceView(pTexture, &srvDesc, out_srv);
+    srvDesc.Texture2D.MipLevels = 1;
+
+    ID3D11ShaderResourceView* srv = nullptr;
+    hr = g_pd3dDevice->CreateShaderResourceView(pTexture, &srvDesc, &srv);
     pTexture->Release();
 
-    *out_width = image_width;
-    *out_height = image_height;
-    stbi_image_free(image_data);
+    if (FAILED(hr) || !srv) {
+        return std::unexpected("Failed to create shader resource view");
+    }
 
-    return true;
+    TextureLoadResult result;
+    result.texture.reset(srv);
+    result.width = imageWidth;
+    result.height = imageHeight;
+
+    return result;
 }
 
-// Open and read a file, then forward to LoadTextureFromMemory()
-bool LoadTextureFromFile(const char *file_name, ID3D11ShaderResourceView **out_srv, int *out_width, int *out_height) {
-    FILE *f = fopen(file_name, "rb");
-    if (f == NULL)
-        return false;
-    fseek(f, 0, SEEK_END);
-    size_t file_size = (size_t) ftell(f);
-    if (file_size == -1)
-        return false;
-    fseek(f, 0, SEEK_SET);
-    void *file_data = IM_ALLOC(file_size);
-    fread(file_data, 1, file_size, f);
-    fclose(f);
-    bool ret = LoadTextureFromMemory(file_data, file_size, out_srv, out_width, out_height);
-    IM_FREE(file_data);
-    return ret;
+[[nodiscard]]
+std::expected<TextureLoadResult, std::string> LoadTextureFromFile(const char* fileName)
+{
+	std::ifstream file(fileName, std::ios::binary | std::ios::ate);
+	if (!file) {
+		return std::unexpected(std::format("Failed to open file: {}", fileName));
+	}
+
+	const std::streamsize fileSize = file.tellg();
+	if (fileSize <= 0) {
+		return std::unexpected("Failed to determine file size");
+	}
+
+	file.seekg(0, std::ios::beg);
+
+	std::vector<char> fileData(static_cast<size_t>(fileSize));
+	if (!file.read(fileData.data(), fileSize)) {
+		return std::unexpected(std::format(
+			"Failed to read file: expected {} bytes", fileSize));
+	}
+
+	return LoadTextureFromMemory(fileData.data(),
+								 static_cast<size_t>(fileSize));
 }
 
+namespace AccountProcessor {
 
-LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+using AccountSnapshot = AccountData;
 
-int WINAPI WinMain(
-    HINSTANCE hInstance,
-    HINSTANCE hPrevInstance,
-    LPSTR lpCmdLine,
-    int nCmdShow) {
-    UNREFERENCED_PARAMETER(hPrevInstance);
-    UNREFERENCED_PARAMETER(lpCmdLine);
+struct ProcessResult {
+    int id;
+    std::string userId;
+    std::string username;
+    std::string displayName;
+    std::string status;
+    std::string lastLocation;
+    uint64_t placeId = 0;
+    std::string jobId;
+    std::string voiceStatus;
+    time_t banExpiry = 0;
+    time_t voiceBanExpiry = 0;
+    bool shouldDeselect = false;
+    bool isInvalid = false;
+};
 
-    // Set DPI awareness first
+[[nodiscard]]
+std::vector<AccountSnapshot> takeAccountSnapshots() {
+    std::shared_lock lock(g_accountsMutex);
+    return { g_accounts.begin(), g_accounts.end() };
+}
+
+[[nodiscard]]
+ProcessResult processAccount(const AccountSnapshot& account) {
+    ProcessResult result{
+        .id = account.id,
+        .userId = account.userId,
+        .username = account.username,
+        .displayName = account.displayName,
+        .status = "Unknown"
+    };
+
+    if (account.cookie.empty()) {
+        return result;
+    }
+
+    auto userJson = Roblox::getAuthenticatedUser(account.cookie);
+    if (userJson.empty()) {
+        result.status = "Network Error";
+        result.voiceStatus = "N/A";
+        result.shouldDeselect = true;
+        result.isInvalid = false;
+        return result;
+    }
+
+    const uint64_t userId = userJson.value("id", 0ULL);
+    result.userId = std::to_string(userId);
+    result.username = userJson.value("name", std::string{});
+    result.displayName = userJson.value("displayName", std::string{});
+
+    if (userId == 0) {
+        result.status = "Error";
+        return result;
+    }
+
+    auto banInfo = Roblox::checkBanStatus(account.cookie);
+    switch (banInfo.status) {
+        case Roblox::BanCheckResult::InvalidCookie:
+            result.isInvalid = true;
+            break;
+
+        case Roblox::BanCheckResult::Banned:
+            result.status = "Banned";
+            result.banExpiry = banInfo.endDate;
+            result.voiceStatus = "N/A";
+            result.shouldDeselect = true;
+            return result;
+
+        case Roblox::BanCheckResult::Warned:
+        case Roblox::BanCheckResult::Terminated:
+        case Roblox::BanCheckResult::Unbanned:
+        case Roblox::BanCheckResult::NetworkError:
+            break;
+    }
+
+    auto voiceStatus = Roblox::getVoiceChatStatus(account.cookie);
+    result.voiceStatus = voiceStatus.status;
+    result.voiceBanExpiry = voiceStatus.bannedUntil;
+
+    auto presences = Roblox::getPresences({ userId }, account.cookie);
+    if (auto it = presences.find(userId); it != presences.end()) {
+        const auto& presence = it->second;
+        result.status = presence.presence;
+        result.lastLocation = presence.lastLocation;
+        result.placeId = presence.placeId;
+        result.jobId = presence.jobId;
+    } else {
+        result.status = "Offline";
+    }
+
+    return result;
+}
+
+void applyResults(const std::vector<ProcessResult>& results) {
+    std::unique_lock lock(g_accountsMutex);
+
+    for (const auto& result : results) {
+        auto it = std::ranges::find_if(g_accounts, [&result](const AccountData& a) {
+            return a.id == result.id;
+        });
+
+        if (it == g_accounts.end()) {
+            continue;
+        }
+
+        it->userId = result.userId;
+        it->username = result.username;
+        it->displayName = result.displayName;
+        it->status = result.status;
+        it->lastLocation = result.lastLocation;
+        it->placeId = result.placeId;
+        it->jobId = result.jobId;
+        it->voiceStatus = result.voiceStatus;
+        it->banExpiry = result.banExpiry;
+        it->voiceBanExpiry = result.voiceBanExpiry;
+
+        if (result.shouldDeselect) {
+            std::lock_guard selLock(g_selectionMutex);
+            g_selectedAccountIds.erase(result.id);
+        }
+    }
+
+    invalidateAccountIndex();
+}
+
+void showInvalidCookieModal(std::vector<int> invalidIds, std::string invalidNames) {
+    if (invalidIds.empty()) {
+        return;
+    }
+
+    ThreadTask::RunOnMain([ids = std::move(invalidIds),
+                           names = std::move(invalidNames)]() {
+        auto message = std::format("Invalid cookies for: {}. Remove them?", names);
+
+        ModalPopup::AddYesNo(message.c_str(), [ids]() {
+            std::unique_lock lock(g_accountsMutex);
+
+            std::erase_if(g_accounts, [&ids](const AccountData& a) {
+                return std::ranges::find(ids, a.id) != ids.end();
+            });
+
+            invalidateAccountIndex();
+
+            for (int id : ids) {
+                g_selectedAccountIds.erase(id);
+            }
+
+            Data::SaveAccounts();
+        });
+    });
+}
+
+}
+
+void refreshAccounts() {
+    auto snapshots = AccountProcessor::takeAccountSnapshots();
+
+    std::vector<AccountProcessor::ProcessResult> results;
+    results.reserve(snapshots.size());
+
+    std::vector<int> invalidIds;
+    std::string invalidNames;
+
+    for (const auto& snapshot : snapshots) {
+        auto result = AccountProcessor::processAccount(snapshot);
+
+        if (result.isInvalid) {
+            invalidIds.push_back(result.id);
+            if (!invalidNames.empty()) {
+                invalidNames.append(", ");
+            }
+            invalidNames.append(snapshot.displayName.empty() ? snapshot.username : snapshot.displayName);
+        }
+
+        results.push_back(std::move(result));
+    }
+
+    ThreadTask::RunOnMain([results = std::move(results),
+                           invalidIds = std::move(invalidIds),
+                           invalidNames = std::move(invalidNames)]() mutable {
+        AccountProcessor::applyResults(results);
+        Data::SaveAccounts();
+        LOG_INFO("Loaded accounts and refreshed statuses");
+
+        AccountProcessor::showInvalidCookieModal(std::move(invalidIds), std::move(invalidNames));
+    });
+}
+
+void startAccountRefreshLoop() {
+    ThreadTask::fireAndForget([] {
+        refreshAccounts();
+
+        while (g_running.load(std::memory_order_relaxed)) {
+            std::this_thread::sleep_for(std::chrono::minutes(g_statusRefreshInterval));
+
+            if (!g_running.load()) break;
+
+            refreshAccounts();
+        }
+    });
+}
+
+void initializeAutoUpdater() {
+    AutoUpdater::Initialize();
+    AutoUpdater::SetBandwidthLimit(5_MB);
+    AutoUpdater::SetShowNotifications(true);
+    AutoUpdater::SetUpdateChannel(UpdateChannel::Stable);
+    AutoUpdater::SetAutoUpdate(true, true, false);
+}
+
+namespace {
+
+LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam)) {
+        return true;
+    }
+
+    switch (msg) {
+        case WM_DPICHANGED: {
+            float newDPIScale = GetDPIScale(hWnd);
+            if (std::abs(newDPIScale - g_currentDPIScale) > 0.01f) {
+                g_currentDPIScale = newDPIScale;
+                ReloadFonts(g_currentDPIScale);
+            }
+            auto* rect = reinterpret_cast<RECT*>(lParam);
+            SetWindowPos(hWnd, nullptr,
+                         rect->left, rect->top,
+                         rect->right - rect->left,
+                         rect->bottom - rect->top,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
+            return 0;
+        }
+
+        case WM_SIZE:
+            if (wParam == SIZE_MINIMIZED) return 0;
+            g_resizeWidth = LOWORD(lParam);
+            g_resizeHeight = HIWORD(lParam);
+            return 0;
+
+        case WM_SYSCOMMAND:
+            if ((wParam & 0xfff0) == SC_KEYMENU) return 0;
+            break;
+
+        case WM_DESTROY:
+            g_running = false;
+            PostQuitMessage(0);
+            return 0;
+    }
+
+    return DefWindowProcW(hWnd, msg, wParam, lParam);
+}
+
+[[nodiscard]]
+HWND createMainWindow(HINSTANCE hInstance) {
+    constexpr wchar_t CLASS_NAME[] = L"AltMan_WindowClass";
+
+    WNDCLASSEXW wc{};
+    wc.cbSize = sizeof(wc);
+    wc.style = CS_CLASSDC;
+    wc.lpfnWndProc = WndProc;
+    wc.hInstance = hInstance;
+    wc.hIcon = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_ICON_32));
+    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wc.lpszClassName = CLASS_NAME;
+    wc.hIconSm = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_ICON_32));
+    RegisterClassExW(&wc);
+
+    UINT dpi = GetDpiForSystem();
+    int width = MulDiv(1000, dpi, 96);
+    int height = MulDiv(560, dpi, 96);
+
+    HWND hwnd = CreateWindowExW(
+        0,
+        CLASS_NAME,
+        L"AltMan",
+        WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, CW_USEDEFAULT,
+        width, height,
+        nullptr, nullptr,
+        hInstance,
+        nullptr
+    );
+
+    BOOL useDarkMode = TRUE;
+    DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &useDarkMode, sizeof(useDarkMode));
+
+    return hwnd;
+}
+
+}
+
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
-    HRESULT hrCom = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    HRESULT hrCom = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
     if (FAILED(hrCom)) {
-        char buf[128];
-        snprintf(buf, sizeof(buf), "Failed to initialize COM library. Error code = 0x%lX", hrCom);
-        LOG_ERROR(buf);
-        MessageBoxA(NULL, buf, "COM Error", MB_OK | MB_ICONERROR);
+        auto msg = std::format("Failed to initialize COM library. Error code = {:#x}", static_cast<unsigned long>(hrCom));
+        LOG_ERROR(msg.c_str());
+        MessageBoxA(nullptr, msg.c_str(), "COM Error", MB_OK | MB_ICONERROR);
         return 1;
     }
 
     Data::LoadSettings("settings.json");
+
     if (g_checkUpdatesOnStartup) {
-        CheckForUpdates();
+        initializeAutoUpdater();
     }
+
     Data::LoadAccounts("accounts.json");
     Data::LoadFriends("friends.json");
 
-    auto refreshAccounts = [] {
-        std::vector<int> invalidIds;
-        std::string names;
-        for (auto &acct: g_accounts) {
-            if (acct.cookie.empty())
-                continue;
-            auto banInfo = Roblox::checkBanStatus(acct.cookie);
-            if (banInfo.status == Roblox::BanCheckResult::InvalidCookie) {
-                invalidIds.push_back(acct.id);
-                if (!names.empty())
-                    names += ", ";
-                names += acct.displayName.empty() ? acct.username : acct.displayName;
-            } else if (banInfo.status == Roblox::BanCheckResult::Banned) {
-                acct.status = "Banned";
-                acct.banExpiry = banInfo.endDate;
-                g_selectedAccountIds.erase(acct.id);
-            } else if (banInfo.status == Roblox::BanCheckResult::Warned) {
-                acct.status = "Warned";
-                acct.banExpiry = 0;
-                g_selectedAccountIds.erase(acct.id);  // Remove from selection like banned accounts
-            } else if (banInfo.status == Roblox::BanCheckResult::Terminated) {
-                acct.status = "Terminated";
-                acct.banExpiry = 0; // Terminated accounts don't have an end date
-                g_selectedAccountIds.erase(acct.id);
-            }
-        }
-        for (auto &acct: g_accounts) {
-            if (acct.cookie.empty() && acct.userId.empty())
-                continue;
+    startAccountRefreshLoop();
 
-            bool needsUserInfoUpdate = true;
-            uint64_t uid = 0;
-
-            // Try cookie first - it's the most authoritative source
-            if (!acct.cookie.empty()) {
-                auto banInfo = Roblox::checkBanStatus(acct.cookie);
-                if (banInfo.status == Roblox::BanCheckResult::Banned) {
-                    acct.status = "Banned";
-                    acct.banExpiry = banInfo.endDate;
-                    acct.voiceStatus = "N/A";
-                    acct.voiceBanExpiry = 0;
-                    continue;
-                } else if (banInfo.status == Roblox::BanCheckResult::Warned) {
-                    acct.status = "Warned";
-                    acct.banExpiry = 0;
-                    acct.voiceStatus = "N/A";
-                    acct.voiceBanExpiry = 0;
-                    continue;  // Skip processing like banned accounts
-                } else if (banInfo.status == Roblox::BanCheckResult::Terminated) {
-                    acct.status = "Terminated";
-                    acct.banExpiry = 0;
-                    acct.voiceStatus = "N/A";
-                    acct.voiceBanExpiry = 0;
-                    continue;
-                } else if (banInfo.status == Roblox::BanCheckResult::Unbanned) {
-                    // Get fresh data from authenticated endpoint
-                    auto userJson = Roblox::getAuthenticatedUser(acct.cookie);
-                    if (!userJson.empty()) {
-                        // Update everything from authenticated data
-                        acct.userId = std::to_string(userJson.value("id", 0ULL));
-                        acct.username = userJson.value("name", "");
-                        acct.displayName = userJson.value("displayName", "");
-                        needsUserInfoUpdate = false;
-
-                        try {
-                            uid = std::stoull(acct.userId);
-                            auto presences = Roblox::getPresences({uid}, acct.cookie);
-                            if (!presences.empty()) {
-                                auto it = presences.find(uid);
-                                if (it != presences.end()) {
-                                    acct.status = it->second.presence;
-                                    acct.lastLocation = it->second.lastLocation;
-                                    acct.placeId = it->second.placeId;
-                                    acct.jobId = it->second.jobId;
-                                } else {
-                                    acct.status = "Offline";
-                                    acct.lastLocation = "";
-                                    acct.placeId = 0;
-                                    acct.jobId.clear();
-                                }
-                            } else {
-                                acct.status = Roblox::getPresence(acct.cookie, uid);
-                                acct.lastLocation = "";
-                                acct.placeId = 0;
-                                acct.jobId.clear();
-                            }
-                            auto vs = Roblox::getVoiceChatStatus(acct.cookie);
-                            acct.voiceStatus = vs.status;
-                            acct.voiceBanExpiry = vs.bannedUntil;
-                            acct.banExpiry = 0;
-                        } catch (const std::exception &e) {
-                            LOG_ERROR("Error getting presence: " + std::string(e.what()));
-                            acct.status = "Error";
-                        }
-                    }
-                }
-            }
-
-            // Fall back to userId if cookie failed or is empty
-            if (needsUserInfoUpdate && !acct.userId.empty()) {
-                try {
-                    uid = std::stoull(acct.userId);
-                    auto userInfo = Roblox::getUserInfo(acct.userId);
-                    if (userInfo.id != 0) {
-                        acct.username = userInfo.username;
-                        acct.displayName = userInfo.displayName;
-                        acct.status = "Cookie Invalid";
-                        acct.voiceStatus = "N/A";
-                        acct.voiceBanExpiry = 0;
-                    } else {
-                        acct.status = "Error: Invalid UserID";
-                    }
-                } catch (const std::exception &e) {
-                    char errorMsg[256];
-                    snprintf(errorMsg, sizeof(errorMsg), "Error converting userId %s: %s", acct.userId.c_str(),
-                             e.what());
-                    LOG_ERROR(errorMsg);
-                    acct.status = "Error: Invalid UserID";
-                }
-            }
-        }
-        Data::SaveAccounts();
-        LOG_INFO("Loaded accounts and refreshed statuses");
-
-        if (!invalidIds.empty()) {
-            std::string namesCopy = names;
-            MainThread::Post([invalidIds, namesCopy]() {
-                char buf[512];
-                snprintf(buf, sizeof(buf), "Invalid cookies for: %s. Remove them?", namesCopy.c_str());
-                ConfirmPopup::Add(buf, [invalidIds]() {
-                    erase_if(g_accounts, [&](const AccountData &a) {
-                        return std::find(invalidIds.begin(), invalidIds.end(), a.id) != invalidIds.end();
-                    });
-                    for (int id: invalidIds) {
-                        g_selectedAccountIds.erase(id);
-                    }
-                    Data::SaveAccounts();
-                });
-            });
-        }
-    };
-
-    Threading::newThread([refreshAccounts] {
-        refreshAccounts();
-        while (true) {
-            std::this_thread::sleep_for(std::chrono::minutes(g_statusRefreshInterval));
-            LOG_INFO("Refreshing account statuses...");
-            refreshAccounts();
-            LOG_INFO("Refreshed account statuses");
-        }
-    });
-
-    WNDCLASSEXW wc = {
-        sizeof(wc), CS_CLASSDC, WndProc, 0L, 0L,
-        hInstance,
-        LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON_32)),
-        LoadCursor(nullptr, IDC_ARROW),
-        nullptr, nullptr,
-        L"ImGui Example",
-        LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON_32))
-    };
-    RegisterClassExW(&wc);
-    UINT dpi = GetDpiForSystem();
-    int width = MulDiv(1000, dpi, 96);
-    int height = MulDiv(560, dpi, 96);
-    HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"AltMan", WS_OVERLAPPEDWINDOW, 100, 100, width, height, nullptr,
-                                nullptr,
-                                hInstance,
-                                nullptr);
-
-    Notifications::g_appHWnd = hwnd;
-
-    // Get initial DPI scale
+    HWND hwnd = createMainWindow(hInstance);
     g_currentDPIScale = GetDPIScale(hwnd);
-
-    BOOL useDarkMode = TRUE;
-    DwmSetWindowAttribute(
-        hwnd, DWMWINDOWATTRIBUTE::DWMWA_USE_IMMERSIVE_DARK_MODE,
-        &useDarkMode, sizeof(useDarkMode));
 
     if (!CreateDeviceD3D(hwnd)) {
         LOG_ERROR("Failed to create D3D device.");
-        MessageBoxA(hwnd, "Failed to create D3D device. The application will now exit.", "D3D Error",
-                    MB_OK | MB_ICONERROR);
+        MessageBoxA(hwnd, "Failed to create D3D device. The application will now exit.",
+                    "D3D Error", MB_OK | MB_ICONERROR);
         CleanupDeviceD3D();
-        UnregisterClassW(wc.lpszClassName, hInstance);
         CoUninitialize();
         return 1;
     }
@@ -393,47 +610,47 @@ int WINAPI WinMain(
     ShowWindow(hwnd, nCmdShow);
     UpdateWindow(hwnd);
 
-    // Initialize ImGui
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    ImGuiIO &io = ImGui::GetIO();
-    (void) io;
+
+    ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 
     ImGui::StyleColorsDark();
+
     ImGui_ImplWin32_Init(hwnd);
     ImGui_ImplDX11_Init(g_pd3dDevice, g_pd3dDeviceContext);
 
-    // Load fonts with current DPI scaling
     ReloadFonts(g_currentDPIScale);
 
-    auto clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
+    constexpr ImVec4 clearColor{ 0.45f, 0.55f, 0.60f, 1.00f };
 
     bool done = false;
     while (!done) {
         MSG msg;
-        while (::PeekMessage(&msg, nullptr, 0U, 0U, PM_REMOVE)) {
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
-            ::DispatchMessage(&msg);
-            if (msg.message == WM_QUIT)
+            DispatchMessageW(&msg);
+            if (msg.message == WM_QUIT) {
                 done = true;
+            }
         }
-        if (done)
-            break;
 
-        MainThread::Process();
+        if (done) break;
 
-        if (g_SwapChainOccluded && g_pSwapChain->Present(0, DXGI_PRESENT_TEST) == DXGI_STATUS_OCCLUDED) {
+        ThreadTask::RunOnMainUpdate();
+
+        if (g_swapChainOccluded && g_pSwapChain->Present(0, DXGI_PRESENT_TEST) == DXGI_STATUS_OCCLUDED) {
             Sleep(10);
             continue;
         }
-        g_SwapChainOccluded = false;
+        g_swapChainOccluded = false;
 
-        if (g_ResizeWidth != 0 && g_ResizeHeight != 0) {
+        if (g_resizeWidth != 0 && g_resizeHeight != 0) {
             CleanupRenderTarget();
-            g_pSwapChain->ResizeBuffers(0, g_ResizeWidth, g_ResizeHeight, DXGI_FORMAT_UNKNOWN, 0);
-            g_ResizeWidth = g_ResizeHeight = 0;
+            g_pSwapChain->ResizeBuffers(0, g_resizeWidth, g_resizeHeight, DXGI_FORMAT_UNKNOWN, 0);
+            g_resizeWidth = g_resizeHeight = 0;
             CreateRenderTarget();
         }
 
@@ -441,28 +658,40 @@ int WINAPI WinMain(
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
 
-        const ImGuiViewport *viewport = ImGui::GetMainViewport();
+        const ImGuiViewport* viewport = ImGui::GetMainViewport();
         ImGui::SetNextWindowPos(viewport->WorkPos);
         ImGui::SetNextWindowSize(viewport->WorkSize);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
 
-        if (RenderUI()) {
-            done = true;
+        bool shouldQuit = false;
+        {
+            std::shared_lock lock(g_accountsMutex);
+            shouldQuit = RenderUI();
         }
 
         ImGui::PopStyleVar(1);
-
         ImGui::Render();
-        const float clear_color_with_alpha[4] = {
-            clear_color.x * clear_color.w, clear_color.y * clear_color.w, clear_color.z * clear_color.w, clear_color.w
+
+        const float clearColorWithAlpha[4] = {
+            clearColor.x * clearColor.w,
+            clearColor.y * clearColor.w,
+            clearColor.z * clearColor.w,
+            clearColor.w
         };
+
         g_pd3dDeviceContext->OMSetRenderTargets(1, &g_mainRenderTargetView, nullptr);
-        g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, clear_color_with_alpha);
+        g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, clearColorWithAlpha);
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 
-        HRESULT hr_present = g_pSwapChain->Present(1, 0);
-        g_SwapChainOccluded = (hr_present == DXGI_STATUS_OCCLUDED);
+        HRESULT hrPresent = g_pSwapChain->Present(1, 0);
+        g_swapChainOccluded = (hrPresent == DXGI_STATUS_OCCLUDED);
+
+        if (shouldQuit) {
+            done = true;
+        }
     }
+
+    g_running = false;
 
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();
@@ -470,115 +699,7 @@ int WINAPI WinMain(
 
     CleanupDeviceD3D();
     DestroyWindow(hwnd);
-    UnregisterClassW(wc.lpszClassName, hInstance);
-
     CoUninitialize();
+
     return 0;
-}
-
-bool CreateDeviceD3D(HWND hWnd) {
-    DXGI_SWAP_CHAIN_DESC sd;
-    ZeroMemory(&sd, sizeof(sd));
-    sd.BufferCount = 2;
-    sd.BufferDesc.Width = 0;
-    sd.BufferDesc.Height = 0;
-    sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    sd.BufferDesc.RefreshRate.Numerator = 60;
-    sd.BufferDesc.RefreshRate.Denominator = 1;
-    sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
-    sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    sd.OutputWindow = hWnd;
-    sd.SampleDesc.Count = 1;
-    sd.SampleDesc.Quality = 0;
-    sd.Windowed = TRUE;
-    sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
-
-    UINT createDeviceFlags = 0;
-
-    D3D_FEATURE_LEVEL featureLevel;
-    constexpr D3D_FEATURE_LEVEL featureLevelArray[2] = {
-        D3D_FEATURE_LEVEL_11_0,
-        D3D_FEATURE_LEVEL_10_0,
-    };
-    HRESULT res = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, createDeviceFlags,
-                                                featureLevelArray, 2, D3D11_SDK_VERSION, &sd, &g_pSwapChain,
-                                                &g_pd3dDevice, &featureLevel, &g_pd3dDeviceContext);
-    if (res == DXGI_ERROR_UNSUPPORTED)
-        res = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, createDeviceFlags,
-                                            featureLevelArray, 2, D3D11_SDK_VERSION, &sd, &g_pSwapChain, &g_pd3dDevice,
-                                            &featureLevel, &g_pd3dDeviceContext);
-    if (res != S_OK)
-        return false;
-
-    CreateRenderTarget();
-    return true;
-}
-
-void CleanupDeviceD3D() {
-    CleanupRenderTarget();
-    if (g_pSwapChain) {
-        g_pSwapChain->Release();
-        g_pSwapChain = nullptr;
-    }
-    if (g_pd3dDeviceContext) {
-        g_pd3dDeviceContext->Release();
-        g_pd3dDeviceContext = nullptr;
-    }
-    if (g_pd3dDevice) {
-        g_pd3dDevice->Release();
-        g_pd3dDevice = nullptr;
-    }
-}
-
-void CreateRenderTarget() {
-    ID3D11Texture2D *pBackBuffer;
-    g_pSwapChain->GetBuffer(0, IID_PPV_ARGS(&pBackBuffer));
-    g_pd3dDevice->CreateRenderTargetView(pBackBuffer, nullptr, &g_mainRenderTargetView);
-    pBackBuffer->Release();
-}
-
-void CleanupRenderTarget() {
-    if (g_mainRenderTargetView) {
-        g_mainRenderTargetView->Release();
-        g_mainRenderTargetView = nullptr;
-    }
-}
-
-extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
-
-LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
-        return true;
-
-    switch (msg) {
-        case WM_DPICHANGED: {
-            float newDPIScale = GetDPIScale(hWnd);
-            if (abs(newDPIScale - g_currentDPIScale) > 0.01f) {
-                g_currentDPIScale = newDPIScale;
-                ReloadFonts(g_currentDPIScale);
-            }
-
-            RECT *prcNewWindow = reinterpret_cast<RECT *>(lParam);
-            SetWindowPos(hWnd, nullptr,
-                         prcNewWindow->left, prcNewWindow->top,
-                         prcNewWindow->right - prcNewWindow->left,
-                         prcNewWindow->bottom - prcNewWindow->top,
-                         SWP_NOZORDER | SWP_NOACTIVATE);
-            return 0;
-        }
-        case WM_SIZE:
-            if (wParam == SIZE_MINIMIZED)
-                return 0;
-            g_ResizeWidth = static_cast<UINT>(LOWORD(lParam));
-            g_ResizeHeight = static_cast<UINT>(HIWORD(lParam));
-            return 0;
-        case WM_SYSCOMMAND:
-            if ((wParam & 0xfff0) == SC_KEYMENU)
-                return 0;
-            break;
-        case WM_DESTROY:
-            PostQuitMessage(0);
-            return 0;
-    }
-    return DefWindowProcW(hWnd, msg, wParam, lParam);
 }

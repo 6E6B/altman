@@ -104,7 +104,6 @@ private:
     [[nodiscard]] static constexpr std::string_view GetChannelName(UpdateChannel channel) noexcept;
     [[nodiscard]] static std::string GetPlatformAssetName(UpdateChannel channel);
     [[nodiscard]] static std::string GetDeltaAssetName(std::string_view fromVersion, std::string_view toVersion);
-    [[nodiscard]] static std::filesystem::path GetBackupPath();
     [[nodiscard]] static std::filesystem::path GetUpdateScriptPath();
 
     static void CreateUpdateScript(const std::string& newExecutable, const std::string& currentExecutable, const std::string& backupPath);

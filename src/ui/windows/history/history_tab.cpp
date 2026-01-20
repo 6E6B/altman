@@ -1,5 +1,3 @@
-#define _CRT_SECURE_NO_WARNINGS
-
 #include <unordered_set>
 #include <filesystem>
 #include <imgui.h>
@@ -30,6 +28,9 @@
 #include "ui/widgets/modal_popup.h"
 #ifdef _WIN32
     #include <windows.h>
+	#include <shellapi.h>
+#elif __APPLE__
+	#include <unistd.h>
 #endif
 #include "console/console.h"
 
@@ -56,20 +57,36 @@ namespace {
     bool g_should_scroll_to_selection = false;
 }
 
-static void OpenFileOrFolder(const std::string& path) {
+static void OpenFileOrFolder(const std::filesystem::path& path)
+{
 #ifdef _WIN32
-    ShellExecuteA(NULL, "open", path.c_str(), NULL, NULL, SW_SHOWNORMAL);
-#elif __APPLE__
-    std::string command = std::format("open \"{}\"", path);
-    system(command.c_str());
-#else
-    std::string command = std::format("xdg-open \"{}\"", path);
-    system(command.c_str());
+	ShellExecuteW(
+		nullptr,
+		L"open",
+		path.wstring().c_str(),
+		nullptr,
+		nullptr,
+		SW_SHOWNORMAL
+	);
+
+#elif defined(__APPLE__)
+	pid_t pid = fork();
+	if (pid == 0) {
+		execl("/usr/bin/open", "open", path.c_str(), (char*)nullptr);
+		_exit(1);
+	}
+
+#else // Linux / BSD
+	pid_t pid = fork();
+	if (pid == 0) {
+		execlp("xdg-open", "xdg-open", path.c_str(), (char*)nullptr);
+		_exit(1);
+	}
 #endif
 }
 
 static void openLogsFolder() {
-    std::string dir = logsFolder();
+    auto dir = GetLogsFolder();
     if (!dir.empty() && std::filesystem::exists(dir)) {
         OpenFileOrFolder(dir);
     } else {
@@ -150,7 +167,7 @@ static void updateFilteredLogs() {
 }
 
 static void clearLogs() {
-    std::string dir = logsFolder();
+    auto dir = GetLogsFolder();
     if (!dir.empty() && std::filesystem::exists(dir)) {
         for (const auto& entry : std::filesystem::directory_iterator(dir)) {
             if (entry.is_regular_file() && entry.path().extension() == ".log") {
@@ -177,7 +194,7 @@ static void refreshLogs() {
     ThreadTask::fireAndForget([]() {
         LOG_INFO("Scanning Roblox logs folder...");
         std::vector<LogInfo> tempLogs;
-        std::string dir = logsFolder();
+        auto dir = GetLogsFolder();
 
         if (!dir.empty() && std::filesystem::exists(dir)) {
             for (const auto& entry : std::filesystem::directory_iterator(dir)) {
@@ -508,7 +525,7 @@ void RenderHistoryTab() {
     }
 
     if (g_search_active) {
-        ImGui::TextColored(ImVec4(0.0f, 0.8f, 1.0f, 1.0f),
+        ImGui::TextColored(ImVec4(0.0f, 0.8f, 1.0f, 1.0f), "%s",
             std::format("Found {} matching logs", g_filtered_log_indices.size()).c_str());
     }
 

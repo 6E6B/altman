@@ -28,13 +28,7 @@ struct LaunchParams {
 	static LaunchParams followUser(const std::string& userId);
 };
 
-#ifdef _WIN32
-#include <windows.h>
-HANDLE startRoblox(uint64_t placeId, const std::string& jobId, const std::string& cookie);
-#endif
-
 #ifdef __APPLE__
-bool patchRobloxBinary(const std::string& appPath);
 bool copyClientToUserEnvironment(const std::string& username, const std::string& clientName);
 bool createSandboxedRoblox(AccountData& acc, const std::string& protocolURL);
 #endif

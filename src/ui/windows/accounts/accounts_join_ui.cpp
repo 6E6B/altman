@@ -408,16 +408,7 @@ void RenderJoinOptions() {
 
     if (ImGui::Button(std::format(" {}  Launch ", ICON_LAUNCH).c_str())) {
         auto doJoin = [&]() { performJoin(); };
-
-#ifdef _WIN32
-        if (!g_multiRobloxEnabled && RobloxControl::IsRobloxRunning()) {
-            ModalPopup::Add("Roblox is already running. Launch anyway?", doJoin);
-        } else {
-            doJoin();
-        }
-#else
         doJoin();
-#endif
     }
     ImGui::EndDisabled();
 

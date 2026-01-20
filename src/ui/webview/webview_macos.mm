@@ -5,14 +5,12 @@
 #include <memory>
 #include "webview.h"
 #include "components/data.h"
+#include "utils/paths.h"
 
-static inline const std::string kUserDataFolder = [] {
-    const char* home = getenv("HOME");
-    if (!home) home = "/tmp";
-    std::filesystem::path p = std::filesystem::path(home) / "Library" / "Application Support" / "Altman" / "WebViewProfiles" / "Roblox";
-    std::filesystem::create_directories(p);
+std::string GetUserDataFolder() {
+	std::filesystem::path p = AltMan::Paths::WebViewProfiles();
     return p.string();
-}();
+}
 
 @class WebViewWindowController;
 
@@ -72,7 +70,7 @@ static NSMutableDictionary *GetWebByUser() {
                 else
                     sanitized.push_back('_');
             }
-            std::filesystem::path p = std::filesystem::path(kUserDataFolder) / ("u_" + sanitized);
+            std::filesystem::path p = std::filesystem::path(GetUserDataFolder()) / ("u_" + sanitized);
             std::filesystem::create_directories(p);
             userDataPath = p.string();
         } else if (cookie && [cookie length] > 0) {
@@ -80,11 +78,11 @@ static NSMutableDictionary *GetWebByUser() {
             size_t h = std::hash<std::string>{}(cookieStr);
             char hashHex[17]{};
             snprintf(hashHex, 17, "%016llX", static_cast<unsigned long long>(h));
-            std::filesystem::path p = std::filesystem::path(kUserDataFolder) / ("c_" + std::string(hashHex));
+            std::filesystem::path p = std::filesystem::path(GetUserDataFolder()) / ("c_" + std::string(hashHex));
             std::filesystem::create_directories(p);
             userDataPath = p.string();
         } else {
-            userDataPath = kUserDataFolder;
+            userDataPath = GetUserDataFolder();
         }
 
         _userDataFolder = [NSString stringWithUTF8String:userDataPath.c_str()];

@@ -1,13 +1,38 @@
-cmake_minimum_required(VERSION 3.5...3.27)
-project(AltMan LANGUAGES C CXX OBJC OBJCXX)
+cmake_minimum_required(VERSION 3.20...3.27)
+project(AltMan LANGUAGES C CXX)
 
-set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(CMAKE_CXX_STANDARD 23)
-set(CMAKE_OBJCXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-set(CMAKE_OSX_DEPLOYMENT_TARGET "13.3")
+
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 include(FetchContent)
+
+FetchContent_Declare(
+        nlohmann_json
+        GIT_REPOSITORY https://github.com/nlohmann/json.git
+        GIT_TAG v3.12.0
+)
+FetchContent_MakeAvailable(nlohmann_json)
+
+set(CPR_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+if(APPLE)
+    set(CPR_FORCE_USE_SYSTEM_CURL ON CACHE BOOL "" FORCE)
+    set(CPR_USE_SYSTEM_CURL ON CACHE BOOL "" FORCE)
+elseif(WIN32)
+    set(CURL_STATIC_CRT ON CACHE BOOL "" FORCE)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "" FORCE)
+endif()
+FetchContent_Declare(
+        cpr
+        GIT_REPOSITORY https://github.com/libcpr/cpr.git
+        GIT_TAG 1.11.0
+)
+FetchContent_MakeAvailable(cpr)
 
 FetchContent_Declare(
         imgui
@@ -24,10 +49,50 @@ set(IMGUI_CORE_SRC
         ${imgui_SOURCE_DIR}/imgui_demo.cpp
 )
 
-set(IMGUI_BACKEND_SRC
-        ${imgui_SOURCE_DIR}/backends/imgui_impl_metal.mm
-        ${imgui_SOURCE_DIR}/backends/imgui_impl_osx.mm
-)
+if(APPLE)
+    enable_language(OBJC OBJCXX)
+    set(CMAKE_OBJCXX_STANDARD 23)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "13.3")
+
+    set(IMGUI_BACKEND_SRC
+            ${imgui_SOURCE_DIR}/backends/imgui_impl_metal.mm
+            ${imgui_SOURCE_DIR}/backends/imgui_impl_osx.mm
+    )
+
+elseif(WIN32)
+    add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
+
+    set(WIL_BUILD_PACKAGING OFF CACHE BOOL "" FORCE)
+    set(WIL_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+            wil
+            GIT_REPOSITORY https://github.com/microsoft/wil.git
+            GIT_TAG v1.0.231216.1
+    )
+    FetchContent_MakeAvailable(wil)
+    set(IMGUI_BACKEND_SRC
+            ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp
+            ${imgui_SOURCE_DIR}/backends/imgui_impl_dx11.cpp
+    )
+
+    FetchContent_Declare(
+            webview2
+            URL https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/1.0.2739.15
+            DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
+    FetchContent_MakeAvailable(webview2)
+
+    set(WEBVIEW2_INCLUDE_DIR "${webview2_SOURCE_DIR}/build/native/include")
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64" OR CMAKE_GENERATOR_PLATFORM STREQUAL "ARM64")
+            set(WEBVIEW2_LIB_DIR "${webview2_SOURCE_DIR}/build/native/arm64")
+        else()
+            set(WEBVIEW2_LIB_DIR "${webview2_SOURCE_DIR}/build/native/x64")
+        endif()
+    else()
+        set(WEBVIEW2_LIB_DIR "${webview2_SOURCE_DIR}/build/native/x86")
+    endif()
+endif()
 
 add_library(imgui_lib STATIC
         ${IMGUI_CORE_SRC}
@@ -39,44 +104,64 @@ target_include_directories(imgui_lib PUBLIC
         ${imgui_SOURCE_DIR}/backends
 )
 
-FetchContent_Declare(
-        nlohmann_json
-        GIT_REPOSITORY https://github.com/nlohmann/json.git
-        GIT_TAG v3.11.2
-)
-FetchContent_MakeAvailable(nlohmann_json)
-
-set(CPR_FORCE_USE_SYSTEM_CURL ON CACHE BOOL "" FORCE)
-set(CURL_USE_STATIC_LIBS OFF CACHE BOOL "" FORCE)
-
-FetchContent_Declare(
-        cpr
-        GIT_REPOSITORY https://github.com/libcpr/cpr.git
-        GIT_TAG 1.11.0
-)
-set(CPR_USE_SYSTEM_CURL ON CACHE BOOL "" FORCE)
-set(CPR_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-set(CPR_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-
-FetchContent_MakeAvailable(cpr)
-
-file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS src/*.cpp src/*.mm src/*.h)
-
-if(APPLE)
-    list(REMOVE_ITEM SRC_FILES
-            ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/webview/webview_windows.cpp
-    )
+if(WIN32)
+    target_include_directories(imgui_lib PRIVATE ${WEBVIEW2_INCLUDE_DIR})
 endif()
 
+file(GLOB_RECURSE ALL_SRC_FILES CONFIGURE_DEPENDS
+        src/*.cpp
+        src/*.h
+)
 
-add_executable(AltMan MACOSX_BUNDLE ${SRC_FILES})
+if(APPLE)
+    file(GLOB_RECURSE OBJC_SRC_FILES CONFIGURE_DEPENDS src/*.mm)
+    list(APPEND ALL_SRC_FILES ${OBJC_SRC_FILES})
+
+    list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*main\\.cpp$")
+    list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*webview_windows\\.cpp$")
+    list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*resource\\.rc$")
+
+elseif(WIN32)
+    file(GLOB RC_FILES CONFIGURE_DEPENDS src/*.rc)
+    list(APPEND ALL_SRC_FILES ${RC_FILES})
+
+    list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*main_macos\\.mm$")
+    list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*webview_macos\\.mm$")
+    list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*\\.mm$")
+    list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*ipa_installer\\.cpp$")
+    list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*ipa_installer\\.h$")
+    list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*client_manager\\.cpp$")
+    list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*client_manager\\.h$")
+    list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*client_update_checker\\.cpp$")
+    list(FILTER ALL_SRC_FILES EXCLUDE REGEX ".*client_update_checker\\.h$")
+endif()
+
+if(APPLE)
+    add_executable(AltMan MACOSX_BUNDLE ${ALL_SRC_FILES})
+
+    set(MACOSX_BUNDLE_ICON_FILE AltMan.icns)
+    set_source_files_properties(
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/assets/images/AltMan.icns
+            PROPERTIES MACOSX_PACKAGE_LOCATION Resources
+    )
+    target_sources(AltMan PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/assets/images/AltMan.icns
+    )
+
+elseif(WIN32)
+    add_executable(AltMan WIN32 ${ALL_SRC_FILES})
+
+    add_custom_command(TARGET AltMan POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/src/assets"
+            "$<TARGET_FILE_DIR:AltMan>/assets"
+    )
+endif()
 
 target_include_directories(AltMan PRIVATE
         src
         src/components
-        src/components/history
+        src/console
         src/network
         src/network/roblox
         src/system
@@ -89,33 +174,56 @@ target_include_directories(AltMan PRIVATE
         ${imgui_SOURCE_DIR}/backends
 )
 
-set(MACOSX_BUNDLE_ICON_FILE AltMan.icns)
-
-set_source_files_properties(
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/assets/images/AltMan.icns
-        PROPERTIES
-        MACOSX_PACKAGE_LOCATION Resources
-)
-
-target_sources(AltMan PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/assets/images/AltMan.icns
-)
-
-find_library(COCOA_FRAMEWORK Cocoa REQUIRED)
-find_library(METAL_FRAMEWORK Metal REQUIRED)
-find_library(QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
-find_library(METALKIT_FRAMEWORK MetalKit REQUIRED)
-find_library(WEBKIT_FRAMEWORK WebKit REQUIRED)
-find_library(GAMECONTROLLER_FRAMEWORK GameController REQUIRED)
+if(WIN32)
+    target_include_directories(AltMan PRIVATE ${WEBVIEW2_INCLUDE_DIR})
+endif()
 
 target_link_libraries(AltMan PRIVATE
         imgui_lib
         nlohmann_json::nlohmann_json
         cpr::cpr
-        ${COCOA_FRAMEWORK}
-        ${METAL_FRAMEWORK}
-        ${QUARTZCORE_FRAMEWORK}
-        ${METALKIT_FRAMEWORK}
-        ${WEBKIT_FRAMEWORK}
-        ${GAMECONTROLLER_FRAMEWORK}
 )
+
+if(APPLE)
+    find_library(COCOA_FRAMEWORK Cocoa REQUIRED)
+    find_library(METAL_FRAMEWORK Metal REQUIRED)
+    find_library(QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
+    find_library(METALKIT_FRAMEWORK MetalKit REQUIRED)
+    find_library(WEBKIT_FRAMEWORK WebKit REQUIRED)
+    find_library(GAMECONTROLLER_FRAMEWORK GameController REQUIRED)
+    find_library(SECURITY_FRAMEWORK Security REQUIRED)
+
+    target_link_libraries(AltMan PRIVATE
+            ${COCOA_FRAMEWORK}
+            ${METAL_FRAMEWORK}
+            ${QUARTZCORE_FRAMEWORK}
+            ${METALKIT_FRAMEWORK}
+            ${WEBKIT_FRAMEWORK}
+            ${GAMECONTROLLER_FRAMEWORK}
+            ${SECURITY_FRAMEWORK}
+    )
+
+elseif(WIN32)
+    target_link_libraries(AltMan PRIVATE
+            d3d11
+            dxgi
+            d3dcompiler
+            dwmapi
+            ole32
+            shcore
+            shell32
+            WIL::WIL
+            "${WEBVIEW2_LIB_DIR}/WebView2LoaderStatic.lib"
+    )
+
+    if(MSVC)
+        target_compile_options(AltMan PRIVATE /FS /utf-8)
+        target_link_options(AltMan PRIVATE /SUBSYSTEM:WINDOWS)
+    endif()
+endif()
+
+if(MSVC)
+    target_compile_options(AltMan PRIVATE /W3)
+else()
+    target_compile_options(AltMan PRIVATE -Wall -Wextra -Wpedantic)
+endif()

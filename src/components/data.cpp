@@ -1,15 +1,17 @@
 ﻿#include "data.h"
 
 #ifdef _WIN32
-    #define WIN32_LEAN_AND_MEAN
     #include <windows.h>
     #include <dpapi.h>
-    #pragma comment(lib, "Crypt32.lib")
+#elif __APPLE__
+    #include <Security/Security.h>
+    #include <CommonCrypto/CommonCrypto.h>
 #endif
 
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <filesystem>
+#include <memory>
 #include <unordered_set>
 #include <ranges>
 #include <algorithm>
@@ -19,15 +21,17 @@
 
 #include "utils/account_utils.h"
 #include "utils/base64.h"
+#include "utils/paths.h"
 #include "console/console.h"
 
 namespace {
+
 #ifdef _WIN32
     std::vector<std::uint8_t> encryptData(std::string_view plainText) {
         DATA_BLOB dataIn{
+            .cbData = static_cast<DWORD>(plainText.size() + 1),
             .pbData = const_cast<std::uint8_t*>(
-                reinterpret_cast<const std::uint8_t*>(plainText.data())),
-            .cbData = static_cast<DWORD>(plainText.size() + 1)
+                reinterpret_cast<const std::uint8_t*>(plainText.data()))
         };
         DATA_BLOB dataOut{};
         constexpr auto description = L"User Cookie Data";
@@ -45,8 +49,8 @@ namespace {
 
     std::string decryptData(std::span<const std::uint8_t> encryptedData) {
         DATA_BLOB dataIn{
-            .pbData = const_cast<std::uint8_t*>(encryptedData.data()),
-            .cbData = static_cast<DWORD>(encryptedData.size())
+            .cbData = static_cast<DWORD>(encryptedData.size()),
+            .pbData = const_cast<std::uint8_t*>(encryptedData.data())
         };
         DATA_BLOB dataOut{};
         LPWSTR descriptionOut = nullptr;
@@ -73,49 +77,14 @@ namespace {
     }
 
 #elif __APPLE__
-    std::vector<std::uint8_t> encryptData(std::string_view plainText) {
-        return std::vector<std::uint8_t>(plainText.begin(), plainText.end());
+	std::vector<std::uint8_t> encryptData(std::string_view plainText) {
+    	return std::vector<std::uint8_t>(plainText.begin(), plainText.end());
     }
 
-    std::string decryptData(std::span<const std::uint8_t> encryptedData) {
-        return std::string(encryptedData.begin(), encryptedData.end());
+	std::string decryptData(std::span<const std::uint8_t> encryptedData) {
+    	return std::string(encryptedData.begin(), encryptedData.end());
     }
 #endif
-
-    const std::filesystem::path& getStorageDir() {
-        static std::filesystem::path dir = []() {
-            std::filesystem::path result;
-
-#ifdef _WIN32
-            std::array<wchar_t, MAX_PATH> exePath{};
-            if (GetModuleFileNameW(nullptr, exePath.data(), exePath.size())) {
-                result = std::filesystem::path(exePath.data()).parent_path() / L"storage";
-            } else {
-                result = L"storage";
-            }
-#else
-            if (const char* home = std::getenv("HOME")) {
-                result = std::filesystem::path(home) / "Library" / "Application Support" /
-                        "Altman" / "storage";
-            } else {
-                result = "storage";
-            }
-#endif
-
-            std::error_code ec;
-            std::filesystem::create_directories(result, ec);
-            if (ec) {
-                LOG_ERROR("Failed to create storage directory: {}", ec.message());
-            }
-            return result;
-        }();
-
-        return dir;
-    }
-
-    std::string makePath(std::string_view filename) {
-        return (getStorageDir() / filename).string();
-    }
 
     std::optional<std::string> encryptCookie(std::string_view cookie) {
         if (cookie.empty())
@@ -261,105 +230,106 @@ namespace {
         }
         return mapping;
     }
-}
 
-std::unordered_map<int, size_t> s_accountIndexCache;
+} // anonymous namespace
+
+std::unordered_map<int, std::size_t> s_accountIndexCache;
 bool s_accountIndexDirty = true;
 
 void ensureAccountIndexValid() {
-	if (!s_accountIndexDirty) return;
+    if (!s_accountIndexDirty) return;
 
-	s_accountIndexCache.clear();
-	s_accountIndexCache.reserve(g_accounts.size());
+    s_accountIndexCache.clear();
+    s_accountIndexCache.reserve(g_accounts.size());
 
-	for (size_t i = 0; i < g_accounts.size(); ++i) {
-		s_accountIndexCache[g_accounts[i].id] = i;
-	}
-	s_accountIndexDirty = false;
+    for (std::size_t i = 0; i < g_accounts.size(); ++i) {
+        s_accountIndexCache[g_accounts[i].id] = i;
+    }
+    s_accountIndexDirty = false;
 }
 
 void invalidateAccountIndex() {
-	s_accountIndexDirty = true;
+    s_accountIndexDirty = true;
 }
 
 AccountData* getAccountById(int id) {
-	ensureAccountIndexValid();
+    ensureAccountIndexValid();
 
-	auto it = s_accountIndexCache.find(id);
-	if (it == s_accountIndexCache.end() || it->second >= g_accounts.size()) {
-		return nullptr;
-	}
-	return &g_accounts[it->second];
+    auto it = s_accountIndexCache.find(id);
+    if (it == s_accountIndexCache.end() || it->second >= g_accounts.size()) {
+        return nullptr;
+    }
+    return &g_accounts[it->second];
 }
 
 std::vector<AccountData*> getUsableSelectedAccounts() {
-	std::vector<AccountData*> result;
-	result.reserve(g_selectedAccountIds.size());
+    std::vector<AccountData*> result;
+    result.reserve(g_selectedAccountIds.size());
 
-	for (int id : g_selectedAccountIds) {
-		if (AccountData* acc = getAccountById(id)) {
-			if (AccountFilters::IsAccountUsable(*acc)) {
-				result.push_back(acc);
-			}
-		}
-	}
-	return result;
+    for (int id : g_selectedAccountIds) {
+        if (AccountData* acc = getAccountById(id)) {
+            if (AccountFilters::IsAccountUsable(*acc)) {
+                result.push_back(acc);
+            }
+        }
+    }
+    return result;
 }
 
 std::vector<const AccountData*> getSelectedAccountsOrdered() {
-	std::vector<const AccountData*> result;
-	result.reserve(g_selectedAccountIds.size());
-	for (const auto& acc : g_accounts) {
-		if (g_selectedAccountIds.contains(acc.id)) {
-			result.push_back(&acc);
-		}
-	}
-	return result;
+    std::vector<const AccountData*> result;
+    result.reserve(g_selectedAccountIds.size());
+    for (const auto& acc : g_accounts) {
+        if (g_selectedAccountIds.contains(acc.id)) {
+            result.push_back(&acc);
+        }
+    }
+    return result;
 }
 
 std::vector<AccountData*> getSelectedAccountsOrderedMutable() {
-	std::vector<AccountData*> result;
-	result.reserve(g_selectedAccountIds.size());
-	for (auto& acc : g_accounts) {
-		if (g_selectedAccountIds.contains(acc.id)) {
-			result.push_back(&acc);
-		}
-	}
-	return result;
+    std::vector<AccountData*> result;
+    result.reserve(g_selectedAccountIds.size());
+    for (auto& acc : g_accounts) {
+        if (g_selectedAccountIds.contains(acc.id)) {
+            result.push_back(&acc);
+        }
+    }
+    return result;
 }
 
 int getAccountIndexById(int id) {
-	ensureAccountIndexValid();
-	auto it = s_accountIndexCache.find(id);
-	if (it == s_accountIndexCache.end() || it->second >= g_accounts.size()) {
-		return -1;
-	}
-	return static_cast<int>(it->second);
+    ensureAccountIndexValid();
+    auto it = s_accountIndexCache.find(id);
+    if (it == s_accountIndexCache.end() || it->second >= g_accounts.size()) {
+        return -1;
+    }
+    return static_cast<int>(it->second);
 }
 
 std::string getPrimaryAccountCookie() {
-	if (g_selectedAccountIds.empty()) return {};
+    if (g_selectedAccountIds.empty()) return {};
 
-	if (const AccountData* acc = getAccountById(*g_selectedAccountIds.begin())) {
-		return acc->cookie;
-	}
-	return {};
+    if (const AccountData* acc = getAccountById(*g_selectedAccountIds.begin())) {
+        return acc->cookie;
+    }
+    return {};
 }
 
 namespace Data {
 
     void LoadAccounts(std::string_view filename) {
-        const auto path = makePath(filename);
-        std::ifstream fileStream{path};
+        const auto path = AltMan::Paths::Config(filename).string();
+        std::ifstream fin{path};
 
-        if (!fileStream.is_open()) {
+        if (!fin.is_open()) {
             LOG_INFO("No {}, starting fresh", path);
             return;
         }
 
         try {
             nlohmann::json dataArray;
-            fileStream >> dataArray;
+            fin >> dataArray;
 
             g_accounts.clear();
             g_accounts.reserve(dataArray.size());
@@ -377,7 +347,7 @@ namespace Data {
     }
 
     void SaveAccounts(std::string_view filename) {
-        const auto path = makePath(filename);
+        const auto path = AltMan::Paths::Config(filename).string();
         std::ofstream out{path};
 
         if (!out.is_open()) {
@@ -395,7 +365,7 @@ namespace Data {
     }
 
     void LoadFavorites(std::string_view filename) {
-        const auto path = makePath(filename);
+        const auto path = AltMan::Paths::Config(filename).string();
         std::ifstream fin{path};
 
         if (!fin.is_open()) {
@@ -425,7 +395,7 @@ namespace Data {
     }
 
     void SaveFavorites(std::string_view filename) {
-        const auto path = makePath(filename);
+        const auto path = AltMan::Paths::Config(filename).string();
         std::ofstream out{path};
 
         if (!out.is_open()) {
@@ -447,7 +417,7 @@ namespace Data {
     }
 
     void LoadSettings(std::string_view filename) {
-        const auto path = makePath(filename);
+        const auto path = AltMan::Paths::Config(filename).string();
         std::ifstream fin{path};
 
         if (!fin.is_open()) {
@@ -464,7 +434,7 @@ namespace Data {
             g_checkUpdatesOnStartup = safeGet(j, "checkUpdatesOnStartup", true);
             g_killRobloxOnLaunch = safeGet(j, "killRobloxOnLaunch", false);
             g_clearCacheOnLaunch = safeGet(j, "clearCacheOnLaunch", false);
-        	g_multiRobloxEnabled = safeGet(j, "multiRobloxEnabled", false);
+            g_multiRobloxEnabled = safeGet(j, "multiRobloxEnabled", false);
 
             if (j.contains("clientKeys") && j["clientKeys"].is_object()) {
                 g_clientKeys.clear();
@@ -490,11 +460,11 @@ namespace Data {
             {"checkUpdatesOnStartup", g_checkUpdatesOnStartup},
             {"killRobloxOnLaunch", g_killRobloxOnLaunch},
             {"clearCacheOnLaunch", g_clearCacheOnLaunch},
-        	{"multiRobloxEnabled", g_multiRobloxEnabled},
+            {"multiRobloxEnabled", g_multiRobloxEnabled},
             {"clientKeys", g_clientKeys}
         };
 
-        const auto path = makePath(filename);
+        const auto path = AltMan::Paths::Config(filename).string();
         std::ofstream out{path};
 
         if (!out.is_open()) {
@@ -507,7 +477,7 @@ namespace Data {
     }
 
     void LoadFriends(std::string_view filename) {
-        const auto path = makePath(filename);
+        const auto path = AltMan::Paths::Config(filename).string();
         std::ifstream fin{path};
 
         if (!fin.is_open()) {
@@ -573,7 +543,7 @@ namespace Data {
     }
 
     void SaveFriends(std::string_view filename) {
-        const auto path = makePath(filename);
+        const auto path = AltMan::Paths::Config(filename).string();
         nlohmann::json root = nlohmann::json::object();
 
         const auto accountIdToUserId = buildAccountIdToUserIdMap();
@@ -606,10 +576,6 @@ namespace Data {
 
         out << root.dump(4);
         LOG_INFO("Saved friend data");
-    }
-
-    std::string StorageFilePath(std::string_view filename) {
-        return makePath(filename);
     }
 
 }

@@ -1,4 +1,3 @@
-#define _CRT_SECURE_NO_WARNINGS
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -245,24 +244,23 @@ namespace {
     }
 }
 
-std::string logsFolder() {
-    #ifdef _WIN32
-        const char* localAppDataPath = std::getenv("LOCALAPPDATA");
-        if (localAppDataPath) {
-            return std::format("{}\\Roblox\\logs", localAppDataPath);
-        }
-    #elif __APPLE__
-        const char* homePath = std::getenv("HOME");
-        if (homePath) {
-            return std::format("{}/Library/Logs/Roblox", homePath);
-        }
-    #else
-        const char* homePath = std::getenv("HOME");
-        if (homePath) {
-            return std::format("{}/Roblox/logs", homePath);
-        }
-    #endif
-    return {};
+std::filesystem::path GetLogsFolder()
+{
+#ifdef _WIN32
+	if (const wchar_t* localAppData = _wgetenv(L"LOCALAPPDATA")) {
+		return std::filesystem::path(localAppData) / "Roblox" / "logs";
+	}
+#elif defined(__APPLE__)
+	if (const char* home = std::getenv("HOME")) {
+		return std::filesystem::path(home) / "Library" / "Logs" / "Roblox";
+	}
+#else
+	if (const char* home = std::getenv("HOME")) {
+		return std::filesystem::path(home) / "Roblox" / "logs";
+	}
+#endif
+
+	return {};
 }
 
 void parseLogFile(LogInfo& logInfo) {

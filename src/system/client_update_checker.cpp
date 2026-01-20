@@ -9,6 +9,7 @@
 #include "system/multi_instance.h"
 #include "console/console.h"
 #include "utils/thread_task.h"
+#include "utils/paths.h"
 #include "ui/widgets/notifications.h"
 
 namespace ClientUpdateChecker {
@@ -22,13 +23,7 @@ namespace {
 }
 
 std::filesystem::path UpdateChecker::GetConfigPath() {
-    std::string appDataDir = MultiInstance::getAppDataDirectory();
-    if (appDataDir.empty()) {
-        return "";
-    }
-    
-    std::filesystem::path path = std::filesystem::path(appDataDir) / "storage" / "client_versions.json";
-    return path;
+	return AltMan::Paths::Config("client_versions.json");
 }
 
 void UpdateChecker::SaveVersionInfo() {
