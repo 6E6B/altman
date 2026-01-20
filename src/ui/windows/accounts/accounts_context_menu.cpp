@@ -619,7 +619,7 @@ void RenderAccountContextMenu(AccountData& account, const std::string& uniqueCon
             g_defaultAccountId = account.id;
             g_selectedAccountIds.clear();
             g_selectedAccountIds.insert(account.id);
-            Data::SaveSettings("settings.json");
+            Data::SaveSettings();
         }
     }
 

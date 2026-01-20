@@ -211,7 +211,7 @@ void RenderSettingsTab() {
 					g_defaultAccountId = g_accounts[idxMap[combo_idx]].id;
 					g_selectedAccountIds.clear();
 					g_selectedAccountIds.insert(g_defaultAccountId);
-					Data::SaveSettings("settings.json");
+					Data::SaveSettings();
 				}
 						   }
 		} else {
@@ -258,14 +258,14 @@ void RenderSettingsTab() {
 		interval = std::max(1, interval);
 		if (interval != g_statusRefreshInterval) {
 			g_statusRefreshInterval = interval;
-			Data::SaveSettings("settings.json");
+			Data::SaveSettings();
 		}
 	}
 
 	bool checkUpdates = g_checkUpdatesOnStartup;
 	if (ImGui::Checkbox("Check for updates on startup", &checkUpdates)) {
 		g_checkUpdatesOnStartup = checkUpdates;
-		Data::SaveSettings("settings.json");
+		Data::SaveSettings();
 	}
 
 	ImGui::Spacing();
@@ -281,7 +281,7 @@ void RenderSettingsTab() {
 			MultiInstance::Disable();
 		}
 
-		Data::SaveSettings("settings.json");
+		Data::SaveSettings();
 	}
 
 	ImGui::BeginDisabled(g_multiRobloxEnabled);
@@ -289,13 +289,13 @@ void RenderSettingsTab() {
 	bool killOnLaunch = g_killRobloxOnLaunch;
 	if (ImGui::Checkbox("Kill Roblox When Launching", &killOnLaunch)) {
 		g_killRobloxOnLaunch = killOnLaunch;
-		Data::SaveSettings("settings.json");
+		Data::SaveSettings();
 	}
 
 	bool clearOnLaunch = g_clearCacheOnLaunch;
 	if (ImGui::Checkbox("Clear Roblox Cache When Launching", &clearOnLaunch)) {
 		g_clearCacheOnLaunch = clearOnLaunch;
-		Data::SaveSettings("settings.json");
+		Data::SaveSettings();
 	}
 
 	ImGui::EndDisabled();
