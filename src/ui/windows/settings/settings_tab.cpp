@@ -14,8 +14,11 @@
 
 #include "components/data.h"
 #include "system/multi_instance.h"
+#include "system/roblox_control.h"
+#include "ui/widgets/modal_popup.h"
 #include "console/console.h"
 #include "utils/paths.h"
+#include "utils/thread_task.h"
 
 #ifdef __APPLE__
 #include "network/ipa_installer_macos.h"
@@ -273,16 +276,56 @@ void RenderSettingsTab() {
 
 	bool multi = g_multiRobloxEnabled;
 	if (ImGui::Checkbox("Multi Roblox", &multi)) {
-		g_multiRobloxEnabled = multi;
+#ifdef _WIN32
+		if (multi && RobloxControl::IsRobloxRunning()) {
+			ModalPopup::AddYesNo(
+				"Enabling Multi Roblox requires closing all running Roblox instances.\n\n"
+				"Do you want to continue?",
+				[]() {
+					RobloxControl::KillRobloxProcesses();
+					ThreadTask::fireAndForget([] {
+						constexpr int maxAttempts = 50;
+						constexpr int delayMs = 100;
 
-		if (g_multiRobloxEnabled) {
-			MultiInstance::Enable();
+						for (int i = 0; i < maxAttempts; ++i) {
+							if (!RobloxControl::IsRobloxRunning()) {
+								g_multiRobloxEnabled = true;
+								MultiInstance::Enable();
+								Data::SaveSettings();
+								LOG_INFO("Multi Roblox enabled after Roblox exit");
+								return;
+							}
+							std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
+						}
+						LOG_ERROR("Timed out waiting for Roblox to exit");
+					});
+				}
+			);
 		} else {
-			MultiInstance::Disable();
+			g_multiRobloxEnabled = multi;
+			if (g_multiRobloxEnabled) {
+				MultiInstance::Enable();
+			} else {
+				MultiInstance::Disable();
+			}
+			Data::SaveSettings();
 		}
-
+#else
+		// Mutex does not work MacOS but we save the option anyways
+		g_multiRobloxEnabled = multi;
 		Data::SaveSettings();
+#endif
 	}
+
+#ifdef _WIN32
+	if (ImGui::IsItemHovered()) {
+		if (g_multiRobloxEnabled) {
+			ImGui::SetTooltip("AltMan must be running before launching Roblox for multi-instance to work.");
+		} else {
+			ImGui::SetTooltip("Enabling this will close any running Roblox instances.");
+		}
+	}
+#endif
 
 	ImGui::BeginDisabled(g_multiRobloxEnabled);
 

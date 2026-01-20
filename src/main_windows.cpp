@@ -38,6 +38,7 @@
 #include "utils/thread_task.h"
 #include "utils/crypto.h"
 #include "system/auto_updater.h"
+#include "system/multi_instance.h"
 #include "console/console.h"
 #include "image.h"
 
@@ -596,6 +597,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     Data::LoadFriends("friends.json");
 
     startAccountRefreshLoop();
+
+	if (g_multiRobloxEnabled) {
+		MultiInstance::Enable();
+	}
 
     HWND hwnd = createMainWindow(hInstance);
     g_currentDPIScale = GetDPIScale(hwnd);
