@@ -69,8 +69,16 @@ std::wstring SanitizeForPath(const std::wstring& input) {
     return sanitized;
 }
 
-std::wstring ComputeUserDataPath(const std::wstring& userId, const std::wstring& cookie) {
+std::wstring ComputeUserDataPath(const std::wstring& userId, const std::wstring& cookie, bool isLoginFlow) {
     const std::wstring baseFolder = GetUserDataFolder();
+
+    if (isLoginFlow) {
+        auto now = std::chrono::system_clock::now().time_since_epoch();
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+        std::filesystem::path p = std::filesystem::path(baseFolder) / std::format(L"temp_login_{}", ms);
+        std::filesystem::create_directories(p);
+        return p.wstring();
+    }
 
     if (!userId.empty()) {
         std::filesystem::path p = std::filesystem::path(baseFolder) / std::format(L"u_{}", SanitizeForPath(userId));
@@ -106,7 +114,8 @@ public:
         , cookieValue_(std::move(cookie))
         , accountKey_(std::move(accountKey))
         , cookieCallback_(std::move(cookieCallback))
-        , userDataFolder_(ComputeUserDataPath(userId, cookieValue_)) {}
+        , isLoginFlow_(cookieCallback_ != nullptr)
+        , userDataFolder_(ComputeUserDataPath(userId, cookieValue_, isLoginFlow_)) {}
 
     ~WebViewWindow() {
         if (hwnd_) {
@@ -353,6 +362,11 @@ private:
     void OnClose() {
         std::lock_guard lock(g_windowsMutex);
         g_windowsByKey.erase(accountKey_);
+
+        if (isLoginFlow_ && !userDataFolder_.empty()) {
+            std::error_code ec;
+            std::filesystem::remove_all(userDataFolder_, ec);
+        }
     }
 
     static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -409,6 +423,7 @@ private:
     std::wstring userDataFolder_;
     std::wstring accountKey_;
     std::function<void(const std::wstring&)> cookieCallback_;
+    bool isLoginFlow_ = false;
 };
 
 } // anonymous namespace
