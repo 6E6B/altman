@@ -49,6 +49,51 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(imgui)
 
+find_package(unofficial-sodium CONFIG QUIET)
+if(unofficial-sodium_FOUND)
+    message(STATUS "Found libsodium via vcpkg")
+    set(SODIUM_TARGET unofficial-sodium::sodium)
+else()
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(SODIUM QUIET IMPORTED_TARGET libsodium)
+        if(SODIUM_FOUND)
+            message(STATUS "Found libsodium via pkg-config")
+            set(SODIUM_TARGET PkgConfig::SODIUM)
+        endif()
+    endif()
+
+    if(NOT SODIUM_TARGET AND APPLE)
+        execute_process(
+                COMMAND brew --prefix libsodium
+                OUTPUT_VARIABLE HOMEBREW_SODIUM
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET
+                RESULT_VARIABLE BREW_RESULT
+        )
+        if(BREW_RESULT EQUAL 0 AND EXISTS "${HOMEBREW_SODIUM}/lib/libsodium.a")
+            message(STATUS "Found libsodium via Homebrew: ${HOMEBREW_SODIUM}")
+            add_library(sodium_imported STATIC IMPORTED)
+            set_target_properties(sodium_imported PROPERTIES
+                    IMPORTED_LOCATION "${HOMEBREW_SODIUM}/lib/libsodium.a"
+                    INTERFACE_INCLUDE_DIRECTORIES "${HOMEBREW_SODIUM}/include"
+            )
+            set(SODIUM_TARGET sodium_imported)
+        endif()
+    endif()
+
+    if(NOT SODIUM_TARGET)
+        message(FATAL_ERROR
+                "libsodium not found!\n"
+                "Install options:\n"
+                "  macOS:   brew install libsodium\n"
+                "  Windows: vcpkg install libsodium:x64-windows-static\n"
+                "           vcpkg install libsodium:arm64-windows-static\n"
+                "Then for vcpkg, configure with: -DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake"
+        )
+    endif()
+endif()
+
 set(IMGUI_CORE_SRC
         ${imgui_SOURCE_DIR}/imgui.cpp
         ${imgui_SOURCE_DIR}/imgui_draw.cpp
@@ -190,7 +235,13 @@ target_link_libraries(AltMan PRIVATE
         imgui_lib
         nlohmann_json::nlohmann_json
         cpr::cpr
+        ${SODIUM_TARGET}
 )
+
+# Required for static linking libsodium on Windows
+if(WIN32)
+    target_compile_definitions(AltMan PRIVATE SODIUM_STATIC)
+endif()
 
 if(APPLE)
     find_library(COCOA_FRAMEWORK Cocoa REQUIRED)

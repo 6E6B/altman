@@ -5,6 +5,8 @@
 #include <string_view>
 #include <set>
 #include <array>
+#include <mutex>
+#include <shared_mutex>
 #include <ctime>
 #include <unordered_map>
 #include <cstdint>
@@ -48,6 +50,9 @@ struct FriendInfo {
     uint64_t placeId = 0;
     std::string jobId;
 };
+
+inline std::mutex g_selectionMutex;
+inline std::shared_mutex g_accountsMutex;
 
 inline std::vector<AccountData> g_accounts;
 inline std::set<int> g_selectedAccountIds;

@@ -20,6 +20,7 @@
 #include "ui/widgets/notifications.h"
 #include "ui/widgets/modal_popup.h"
 #include "utils/thread_task.h"
+#include "utils/crypto.h"
 #include "system/auto_updater.h"
 #include "system/client_update_checker_macos.h"
 #include "console/console.h"
@@ -51,8 +52,6 @@ namespace {
     constexpr ImWchar ICON_MAX_16_FA = 0xf3ff;
     constexpr float BASE_FONT_SIZE = 16.0f;
 
-    std::mutex g_selectionMutex;
-    std::shared_mutex g_accountsMutex;
     std::atomic<bool> g_fontReloadPending = false;
     std::atomic<bool> g_running = true;
 }
@@ -575,6 +574,11 @@ NSWindow* createMainWindow() {
 
 int main(int argc, const char* argv[]) {
     @autoreleasepool {
+        if (auto result = Crypto::initialize(); !result) {
+            std::println("Failed to initialize crypto library {}", Crypto::errorToString(result.error()));
+            return 1;
+        }
+
         Data::LoadSettings("settings.json");
 
         if (g_checkUpdatesOnStartup) {

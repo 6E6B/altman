@@ -36,6 +36,7 @@
 #include "ui/widgets/notifications.h"
 #include "ui/widgets/modal_popup.h"
 #include "utils/thread_task.h"
+#include "utils/crypto.h"
 #include "system/auto_updater.h"
 #include "console/console.h"
 #include "image.h"
@@ -578,11 +579,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
 
     HRESULT hrCom = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
     if (FAILED(hrCom)) {
-        auto msg = std::format("Failed to initialize COM library. Error code = {:#x}", static_cast<unsigned long>(hrCom));
-        LOG_ERROR(msg.c_str());
-        MessageBoxA(nullptr, msg.c_str(), "COM Error", MB_OK | MB_ICONERROR);
+        std::println("Failed to initialize COM library. Error code = {:#x}", static_cast<unsigned long>(hrCom));
         return 1;
     }
+
+	if (auto result = Crypto::initialize(); !result) {
+		std::println("Failed to initialize crypto library {}", Crypto::errorToString(result.error()));
+		return 1;
+	}
 
     Data::LoadSettings("settings.json");
 

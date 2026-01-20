@@ -386,11 +386,12 @@ bool RenderMainMenu() {
 
         if (ImGui::Button("Export")) {
             if (std::strcmp(s_password1, s_password2) == 0 && s_password1[0] != '\0') {
-                if (Backup::Export(s_password1)) {
-                    ModalPopup::AddInfo("Backup saved.");
-                } else {
-                    ModalPopup::AddInfo("Backup failed.");
-                }
+            	auto result = Backup::Export(s_password1);
+            	if (result) {
+            		ModalPopup::AddInfo("Backup saved.");
+            	} else {
+            		ModalPopup::AddInfo(Backup::errorToString(result.error()).data());
+            	}
                 s_password1[0] = s_password2[0] = '\0';
                 ImGui::CloseCurrentPopup();
             } else {
@@ -416,9 +417,19 @@ bool RenderMainMenu() {
         	const auto dir = AltMan::Paths::Backups();
 
             for (const auto& entry : std::filesystem::directory_iterator(dir)) {
-                if (entry.is_regular_file()) {
-                    s_backupFiles.push_back(entry.path().filename().string());
-                }
+
+            	if (!entry.is_regular_file())
+            		continue;
+
+            	const auto& path = entry.path();
+
+            	if (path.filename() == ".DS_Store")
+            		continue;
+
+            	if (path.extension() != ".dat")
+            		continue;
+
+            	s_backupFiles.push_back(entry.path().filename().string());
             }
             std::sort(s_backupFiles.begin(), s_backupFiles.end());
             s_selectedBackup = 0;
@@ -448,19 +459,23 @@ bool RenderMainMenu() {
         ImGui::InputText("Password", s_importPassword, IM_ARRAYSIZE(s_importPassword), ImGuiInputTextFlags_Password);
 
         if (ImGui::Button("Import")) {
-            std::string err;
-            bool ok = false;
-            if (!s_backupFiles.empty()) {
-            	const auto dir = AltMan::Paths::BackupFile(s_backupFiles[s_selectedBackup]);
-                ok = Backup::Import(dir.string(), s_importPassword, &err);
-            }
-            if (ok) {
-                ModalPopup::AddInfo("Import completed.");
-            } else {
-                ModalPopup::AddInfo(err.empty() ? "Import failed." : err.c_str());
-            }
-            s_importPassword[0] = '\0';
-            ImGui::CloseCurrentPopup();
+
+        	if (!s_backupFiles.empty()) {
+        		const auto dir = AltMan::Paths::BackupFile(s_backupFiles[s_selectedBackup]);
+
+        		auto result = Backup::Import(dir.string(), s_importPassword);
+
+        		if (result) {
+        			ModalPopup::AddInfo("Import completed.");
+        		} else {
+        			ModalPopup::AddInfo(Backup::errorToString(result.error()).data());
+        		}
+        	} else {
+        		ModalPopup::AddInfo("No backup selected.");
+        	}
+
+        	s_importPassword[0] = '\0';
+        	ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
         if (ImGui::Button("Cancel")) {
