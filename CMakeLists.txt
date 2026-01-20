@@ -21,7 +21,6 @@ FetchContent_MakeAvailable(nlohmann_json)
 set(CPR_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 if(APPLE)
-    set(CPR_FORCE_USE_SYSTEM_CURL ON CACHE BOOL "" FORCE)
     set(CPR_USE_SYSTEM_CURL ON CACHE BOOL "" FORCE)
 elseif(WIN32)
     set(CPR_USE_SYSTEM_CURL OFF CACHE BOOL "" FORCE)
@@ -48,51 +47,6 @@ FetchContent_Declare(
         GIT_TAG docking
 )
 FetchContent_MakeAvailable(imgui)
-
-find_package(unofficial-sodium CONFIG QUIET)
-if(unofficial-sodium_FOUND)
-    message(STATUS "Found libsodium via vcpkg")
-    set(SODIUM_TARGET unofficial-sodium::sodium)
-else()
-    find_package(PkgConfig QUIET)
-    if(PkgConfig_FOUND)
-        pkg_check_modules(SODIUM QUIET IMPORTED_TARGET libsodium)
-        if(SODIUM_FOUND)
-            message(STATUS "Found libsodium via pkg-config")
-            set(SODIUM_TARGET PkgConfig::SODIUM)
-        endif()
-    endif()
-
-    if(NOT SODIUM_TARGET AND APPLE)
-        execute_process(
-                COMMAND brew --prefix libsodium
-                OUTPUT_VARIABLE HOMEBREW_SODIUM
-                OUTPUT_STRIP_TRAILING_WHITESPACE
-                ERROR_QUIET
-                RESULT_VARIABLE BREW_RESULT
-        )
-        if(BREW_RESULT EQUAL 0 AND EXISTS "${HOMEBREW_SODIUM}/lib/libsodium.a")
-            message(STATUS "Found libsodium via Homebrew: ${HOMEBREW_SODIUM}")
-            add_library(sodium_imported STATIC IMPORTED)
-            set_target_properties(sodium_imported PROPERTIES
-                    IMPORTED_LOCATION "${HOMEBREW_SODIUM}/lib/libsodium.a"
-                    INTERFACE_INCLUDE_DIRECTORIES "${HOMEBREW_SODIUM}/include"
-            )
-            set(SODIUM_TARGET sodium_imported)
-        endif()
-    endif()
-
-    if(NOT SODIUM_TARGET)
-        message(FATAL_ERROR
-                "libsodium not found!\n"
-                "Install options:\n"
-                "  macOS:   brew install libsodium\n"
-                "  Windows: vcpkg install libsodium:x64-windows-static\n"
-                "           vcpkg install libsodium:arm64-windows-static\n"
-                "Then for vcpkg, configure with: -DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake"
-        )
-    endif()
-endif()
 
 set(IMGUI_CORE_SRC
         ${imgui_SOURCE_DIR}/imgui.cpp
@@ -156,6 +110,16 @@ target_include_directories(imgui_lib PUBLIC
         ${imgui_SOURCE_DIR}
         ${imgui_SOURCE_DIR}/backends
 )
+
+FetchContent_Declare(
+        libsodium
+        GIT_REPOSITORY https://github.com/robinlinden/libsodium-cmake.git
+        GIT_TAG 260622e5b69bce9b955603a98e46354125a932a4
+)
+set(SODIUM_DISABLE_TESTS ON CACHE BOOL "" FORCE)
+set(SODIUM_MINIMAL ON CACHE BOOL "" FORCE)
+set(SODIUM_STATIC ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(libsodium)
 
 if(WIN32)
     target_include_directories(imgui_lib PRIVATE ${WEBVIEW2_INCLUDE_DIR})
@@ -235,12 +199,11 @@ target_link_libraries(AltMan PRIVATE
         imgui_lib
         nlohmann_json::nlohmann_json
         cpr::cpr
-        ${SODIUM_TARGET}
+        sodium
 )
 
-# Required for static linking libsodium on Windows
 if(WIN32)
-    target_compile_definitions(AltMan PRIVATE SODIUM_STATIC)
+    target_compile_definitions(sodium INTERFACE SODIUM_STATIC)
 endif()
 
 if(APPLE)

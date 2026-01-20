@@ -1,7 +1,7 @@
 #pragma once
 
 #include <string>
-#include "data.h"
+#include "components/data.h"
 #include "servers/servers.h"
 
 void RenderAccountsTable(std::vector<AccountData> &, const char *, float);

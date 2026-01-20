@@ -1,5 +1,5 @@
 ﻿#include "data.h"
-#include "crypto.h"
+#include "utils/crypto.h"
 
 #include <sodium.h>
 #include <nlohmann/json.hpp>

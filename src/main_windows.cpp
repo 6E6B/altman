@@ -64,8 +64,6 @@ constexpr ImWchar ICON_MIN_FA = 0xf000;
 constexpr ImWchar ICON_MAX_16_FA = 0xf3ff;
 constexpr float BASE_FONT_SIZE = 16.0f;
 
-std::mutex g_selectionMutex;
-std::shared_mutex g_accountsMutex;
 std::atomic<bool> g_running = true;
 
 [[nodiscard]]

@@ -15,7 +15,7 @@
 #include "ipa_installer_macos.h"
 #include "system/client_update_checker_macos.h"
 #include "system/multi_instance.h"
-#include "thread_task.h"
+#include "utils/thread_task.h"
 #include "utils/paths.h"
 
 namespace ClientManager {
