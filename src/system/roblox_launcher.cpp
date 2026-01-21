@@ -542,7 +542,7 @@ bool startRoblox(const LaunchParams& params, AccountData acc) {
 }
 #endif // APPLE
 
-void launchRobloxSequential(const LaunchParams& params, const std::vector<AccountData>& accounts) {
+void launchWithAccounts(const LaunchParams& params, const std::vector<AccountData>& accounts) {
 	if (g_killRobloxOnLaunch)
 		RobloxControl::KillRobloxProcesses();
 	if (g_clearCacheOnLaunch)
@@ -575,6 +575,6 @@ void launchWithSelectedAccounts(LaunchParams params) {
 
 	ThreadTask::fireAndForget([params = std::move(params),
 							   accounts = std::move(accounts)]() {
-		launchRobloxSequential(params, accounts);
+		launchWithAccounts(params, accounts);
 	});
 }

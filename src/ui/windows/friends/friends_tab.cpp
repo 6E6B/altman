@@ -606,7 +606,7 @@ namespace {
 					Status::Error("User is not joinable");
 					return;
 				}
-				launchRobloxSequential(LaunchParams::followUser(std::to_string(uid)), accounts);
+				launchWithAccounts(LaunchParams::followUser(std::to_string(uid)), accounts);
 			});
     	}
         ImGui::EndDisabled();

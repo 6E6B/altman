@@ -448,7 +448,7 @@
     		if (!AccountFilters::IsAccountUsable(account)) return;
 
     		ThreadTask::fireAndForget([placeId, account]() {
-				launchRobloxSequential(LaunchParams::standard(placeId), {account});
+				launchWithAccounts(LaunchParams::standard(placeId), {account});
 			});
     	};
 
@@ -457,7 +457,7 @@
     		if (!AccountFilters::IsAccountUsable(account)) return;
 
     		ThreadTask::fireAndForget([placeId, jobId, account]() {
-				launchRobloxSequential(LaunchParams::gameJob(placeId, jobId), {account});
+				launchWithAccounts(LaunchParams::gameJob(placeId, jobId), {account});
 			});
     	};
         

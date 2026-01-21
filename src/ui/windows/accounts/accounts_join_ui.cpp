@@ -237,7 +237,7 @@ namespace {
 					return;
 				}
 
-				launchRobloxSequential(LaunchParams::gameJob(it->second.placeId, it->second.jobId), accounts);
+				launchWithAccounts(LaunchParams::gameJob(it->second.placeId, it->second.jobId), accounts);
 			} catch (const std::exception& e) {
 				LOG_ERROR("Join by username failed: {}", e.what());
 				Status::Error("Failed to join by username");

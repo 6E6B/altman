@@ -34,7 +34,7 @@ bool createSandboxedRoblox(AccountData& acc, const std::string& protocolURL);
 #endif
 
 bool startRoblox(const LaunchParams& params, AccountData acc);
-void launchRobloxSequential(const LaunchParams& params, const std::vector<AccountData>& accounts);
+void launchWithAccounts(const LaunchParams& params, const std::vector<AccountData>& accounts);
 void launchWithSelectedAccounts(LaunchParams params);
 
 std::string urlEncode(const std::string& s);

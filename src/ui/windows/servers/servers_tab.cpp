@@ -554,7 +554,7 @@ namespace {
 						return;
 					}
 
-					launchRobloxSequential(LaunchParams::privateServerDirect(server.placeId, accessCode), accounts);
+					launchWithAccounts(LaunchParams::privateServerDirect(server.placeId, accessCode), accounts);
 				}
 				catch (const std::exception& ex) {
 					LOG_ERROR("Failed to join private server: {}", ex.what());
