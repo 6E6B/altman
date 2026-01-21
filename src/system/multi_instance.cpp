@@ -799,7 +799,11 @@ bool launchSandboxedClient(const std::string& username,
     }
 
     SpawnOptions opts;
-    opts.env = {{"HOME", profilePath}};
+    opts.env = {
+    	{"HOME", profilePath},
+    	// uses up too much space for desktop but fixes keychain thing
+    	//{"CFFIXED_USER_HOME", profilePath}
+    };
 
     if (mobileClient) {
     	opts.env["CFFIXED_USER_HOME"] = profilePath;
