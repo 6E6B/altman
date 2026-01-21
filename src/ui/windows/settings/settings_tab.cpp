@@ -345,6 +345,15 @@ void RenderSettingsTab() {
 	ImGui::Spacing();
 	ImGui::SeparatorText("Client Management");
 
+	bool forceLatest = g_forceLatestRobloxVersion;
+	if (ImGui::Checkbox("Force Latest Roblox Version For Clients", &forceLatest)) {
+		g_forceLatestRobloxVersion = forceLatest;
+		Data::SaveSettings();
+	}
+	if (ImGui::IsItemHovered()) {
+		ImGui::SetTooltip("If your client crashed on startup try enabling this option, then remove and install client again.\nWhen enabled, ignores client-recommended versions and always uses the latest Roblox version.\nMay cause compatibility issues with some clients.\nDefault client remains non affected.");
+	}
+
 	const float availHeight = ImGui::GetContentRegionAvail().y;
 	const auto& style = ImGui::GetStyle();
 

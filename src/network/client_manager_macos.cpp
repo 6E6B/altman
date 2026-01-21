@@ -17,6 +17,7 @@
 #include "system/multi_instance.h"
 #include "utils/thread_task.h"
 #include "utils/paths.h"
+#include "components/data.h"
 
 namespace ClientManager {
 
@@ -584,19 +585,21 @@ void InstallClientAsync(const std::string& clientName,
 
 		std::string version;
 
-		if (clientName == "Hydrogen") {
-			try {
-				HydrogenVersion ver = GetHydrogenVersion();
-				version = ver.macos.roblox_version.value_or("");
-			} catch (const std::exception& e) {
-				LOG_WARN("Failed to fetch Hydrogen version: {}, falling back to latest", e.what());
-			}
-		} else if (clientName == "MacSploit") {
-			try {
-				MacsploitVersion ver = GetMacsploitVersion();
-				version = ver.clientVersionUpload;
-			} catch (const std::exception& e) {
-				LOG_WARN("Failed to fetch MacSploit version: {}, falling back to latest", e.what());
+		if (!g_forceLatestRobloxVersion) {
+			if (clientName == "Hydrogen") {
+				try {
+					HydrogenVersion ver = GetHydrogenVersion();
+					version = ver.macos.roblox_version.value_or("");
+				} catch (const std::exception& e) {
+					LOG_WARN("Failed to fetch Hydrogen version: {}, falling back to latest", e.what());
+				}
+			} else if (clientName == "MacSploit") {
+				try {
+					MacsploitVersion ver = GetMacsploitVersion();
+					version = ver.clientVersionUpload;
+				} catch (const std::exception& e) {
+					LOG_WARN("Failed to fetch MacSploit version: {}, falling back to latest", e.what());
+				}
 			}
 		}
 

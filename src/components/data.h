@@ -71,6 +71,7 @@ inline bool g_killRobloxOnLaunch = false;
 inline bool g_clearCacheOnLaunch = false;
 inline bool g_multiRobloxEnabled = false;
 inline std::unordered_map<std::string, std::string> g_clientKeys;
+inline bool g_forceLatestRobloxVersion = false;
 
 void invalidateAccountIndex();
 AccountData* getAccountById(int id);
