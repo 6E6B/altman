@@ -6,7 +6,7 @@
 
 struct ImGuiViewport;
 
-namespace ButtonRightStatus {
+namespace BottomRightStatus {
 	enum class Type {
 		Idle,
 		Loading,

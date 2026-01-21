@@ -178,13 +178,13 @@ namespace {
         const std::string trimmedCookie = TrimWhitespace(cookie);
 
         if (trimmedCookie.empty()) {
-            ButtonRightStatus::Error("Invalid cookie: Cookie cannot be empty");
+            BottomRightStatus::Error("Invalid cookie: Cookie cannot be empty");
             return false;
         }
 
         const Roblox::BanCheckResult banStatus = Roblox::cachedBanStatus(trimmedCookie);
         if (banStatus == Roblox::BanCheckResult::InvalidCookie) {
-            ButtonRightStatus::Error("Invalid cookie: Unable to authenticate with Roblox");
+            BottomRightStatus::Error("Invalid cookie: Unable to authenticate with Roblox");
             return false;
         }
 
@@ -194,7 +194,7 @@ namespace {
         const std::string displayName = Roblox::getDisplayName(trimmedCookie);
 
         if (uid == 0 || username.empty() || displayName.empty()) {
-            ButtonRightStatus::Error("Invalid cookie: Unable to retrieve user information");
+            BottomRightStatus::Error("Invalid cookie: Unable to retrieve user information");
             return false;
         }
 

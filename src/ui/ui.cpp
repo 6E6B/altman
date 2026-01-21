@@ -107,7 +107,7 @@ bool RenderUI() {
 
 	float deltaTime = ImGui::GetIO().DeltaTime;
 
-	std::vector<ButtonRightStatus::SelectedAccount> selectedAccounts;
+	std::vector<BottomRightStatus::SelectedAccount> selectedAccounts;
 	selectedAccounts.reserve(g_selectedAccountIds.size());
 
 	for (const int id : g_selectedAccountIds) {
@@ -121,7 +121,7 @@ bool RenderUI() {
 	UpdateNotification::Update(deltaTime);
 	UpdateNotification::Render();
 	ProgressOverlay::Render(deltaTime);
-	ButtonRightStatus::Render(viewport, deltaTime, selectedAccounts);
+	BottomRightStatus::Render(viewport, deltaTime, selectedAccounts);
 
     return exitFromMenu;
 }

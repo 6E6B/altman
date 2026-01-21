@@ -3,7 +3,7 @@
 #include <mutex>
 #include <cmath>
 
-namespace ButtonRightStatus {
+namespace BottomRightStatus {
     namespace {
         constexpr const char* ICON_MOON = "\xEF\x86\x86";
         constexpr const char* ICON_CHECK = "\xEF\x80\x8C";
