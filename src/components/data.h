@@ -72,6 +72,12 @@ inline bool g_clearCacheOnLaunch = false;
 inline bool g_multiRobloxEnabled = false;
 inline std::unordered_map<std::string, std::string> g_clientKeys;
 inline bool g_forceLatestRobloxVersion = false;
+inline std::vector<std::string> g_availableClientsNames = {
+	"Default",
+	"MacSploit",
+	"Hydrogen",
+	"Delta"
+};
 
 void invalidateAccountIndex();
 AccountData* getAccountById(int id);

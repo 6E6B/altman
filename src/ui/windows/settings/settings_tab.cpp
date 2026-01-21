@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "components/data.h"
+#include "system/auto_updater.h"
 #include "system/multi_instance.h"
 #include "system/roblox_control.h"
 #include "ui/widgets/modal_popup.h"
@@ -25,18 +26,12 @@
 #ifdef __APPLE__
 #include "network/ipa_installer_macos.h"
 #include "network/client_manager_macos.h"
+#include "system/client_update_checker_macos.h"
 #endif
 
 static bool g_requestOpenConsoleModal = false;
 
 #ifdef __APPLE__
-static constexpr std::array<std::string_view, 4> g_availableClientsNames = {
-    "Default",
-    "MacSploit",
-    "Hydrogen",
-    "Delta"
-};
-
 struct EnvironmentInfo {
     std::string username;
     std::string path;
@@ -755,6 +750,13 @@ void RenderSettingsTab() {
 		g_checkUpdatesOnStartup = checkUpdates;
 		Data::SaveSettings();
 	}
+	ImGui::SameLine();
+	if (ImGui::Button("Check For Updates Now")) {
+		AutoUpdater::CheckForUpdates(false);
+#ifdef __APPLE__
+		ClientUpdateChecker::UpdateChecker::CheckAllNow();
+#endif
+	}
 
 	ImGui::Spacing();
 	ImGui::SeparatorText("Launch Options");
@@ -996,42 +998,41 @@ void RenderSettingsTab() {
 		static std::unordered_map<std::string, std::array<char, 256>> keyBuffers;
 		static std::unordered_map<std::string, bool> buffersInitialized;
 
-		for (std::string_view clientName : g_availableClientsNames) {
-			const std::string clientStr(clientName);
-			const bool isInstalled = MultiInstance::isBaseClientInstalled(clientStr);
+		for (const auto& clientName : g_availableClientsNames) {
+			const bool isInstalled = MultiInstance::isBaseClientInstalled(clientName);
 			const bool needsKey = (clientName != "Default");
 
 			ImGui::TableNextRow();
-			ImGui::PushID(clientStr.c_str());
+			ImGui::PushID(clientName.c_str());
 
 			ImGui::TableNextColumn();
-			ImGui::Text("%s", clientStr.c_str());
+			ImGui::Text("%s", clientName.c_str());
 
 			ImGui::TableNextColumn();
 			if (needsKey) {
-				auto& key = g_clientKeys[clientStr];
+				auto& key = g_clientKeys[clientName];
 
 				// Initialize buffer only once per client
-				if (!buffersInitialized[clientStr]) {
-					auto& buffer = keyBuffers[clientStr];
+				if (!buffersInitialized[clientName]) {
+					auto& buffer = keyBuffers[clientName];
 					std::strncpy(buffer.data(), key.c_str(), buffer.size() - 1);
 					buffer.back() = '\0';
-					buffersInitialized[clientStr] = true;
+					buffersInitialized[clientName] = true;
 				}
 
-				auto& buffer = keyBuffers[clientStr];
+				auto& buffer = keyBuffers[clientName];
 
 				ImGui::SetNextItemWidth(-FLT_MIN);
 				if (ImGui::InputText("##Key", buffer.data(), buffer.size(), ImGuiInputTextFlags_EnterReturnsTrue)) {
 					key = std::string(buffer.data());
 					Data::SaveSettings();
-					LOG_INFO("Updated key for {}", clientStr);
+					LOG_INFO("Updated key for {}", clientName);
 				}
 
 				if (ImGui::IsItemDeactivatedAfterEdit()) {
 					key = std::string(buffer.data());
 					Data::SaveSettings();
-					LOG_INFO("Updated key for {}", clientStr);
+					LOG_INFO("Updated key for {}", clientName);
 				}
 			} else {
 				ImGui::TextDisabled("No key required");
@@ -1046,9 +1047,9 @@ void RenderSettingsTab() {
 
 			ImGui::TableNextColumn();
 
-			const bool disableInstall = needsKey && g_clientKeys[clientStr].empty();
+			const bool disableInstall = needsKey && g_clientKeys[clientName].empty();
 
-			const bool isCurrentlyInstalling = ProgressOverlay::HasTask("client_" + clientStr);
+			const bool isCurrentlyInstalling = ProgressOverlay::HasTask("client_" + clientName);
 			const bool disableButton = isCurrentlyInstalling || disableInstall;
 
 			if (disableButton) {
@@ -1058,17 +1059,17 @@ void RenderSettingsTab() {
 			if (isInstalled) {
 			    if (ImGui::Button("Remove", ImVec2(-FLT_MIN, 0))) {
 			        ProgressOverlay::Add(
-			            "client_" + clientStr,
-			            std::format("Removing {}...", clientStr)
+			            "client_" + clientName,
+			            std::format("Removing {}...", clientName)
 			        );
 
-			        ClientManager::RemoveClientAsync(clientStr, [clientStr](bool success, const std::string& message) {
+			        ClientManager::RemoveClientAsync(clientName, [clientName](bool success, const std::string& message) {
 			            if (success) {
 			                LOG_INFO("{}", message);
-			                ProgressOverlay::Complete("client_" + clientStr, true, "Removed successfully");
+			                ProgressOverlay::Complete("client_" + clientName, true, "Removed successfully");
 			            } else {
 			                LOG_ERROR("{}", message);
-			                ProgressOverlay::Complete("client_" + clientStr, false, message);
+			                ProgressOverlay::Complete("client_" + clientName, false, message);
 			            }
 
 			            MultiInstance::getAvailableClientsForUI(true);
@@ -1076,14 +1077,14 @@ void RenderSettingsTab() {
 			    }
 			} else {
 			    if (ImGui::Button("Install", ImVec2(-FLT_MIN, 0))) {
-			        const std::string taskId = "client_" + clientStr;
+			        const std::string taskId = "client_" + clientName;
 
 			        ProgressOverlay::Add(
 			            taskId,
-			            std::format("Installing {}...", clientStr),
+			            std::format("Installing {}...", clientName),
 			            true,
-			            [clientStr]() {
-			                LOG_INFO("Installation cancelled by user: {}", clientStr);
+			            [clientName]() {
+			                LOG_INFO("Installation cancelled by user: {}", clientName);
 			            }
 			        );
 
@@ -1103,7 +1104,7 @@ void RenderSettingsTab() {
 			            MultiInstance::getAvailableClientsForUI(true);
 			        };
 
-			        ClientManager::InstallClientAsync(clientStr, progressCallback, completionCallback);
+			        ClientManager::InstallClientAsync(clientName, progressCallback, completionCallback);
 			    }
 
 			    if (disableInstall && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {

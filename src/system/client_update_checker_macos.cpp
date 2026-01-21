@@ -11,6 +11,7 @@
 #include "utils/thread_task.h"
 #include "utils/paths.h"
 #include "ui/widgets/notifications.h"
+#include "components/data.h"
 
 namespace ClientUpdateChecker {
 
@@ -181,9 +182,8 @@ void UpdateChecker::CheckerLoop() {
     LOG_INFO("Client update checker started");
 
     while (!shouldStop) {
-        std::vector<std::string> clientsToCheck = {"Default", "MacSploit", "Hydrogen", "Delta"};
         
-        for (const auto& clientName : clientsToCheck) {
+        for (const auto& clientName : g_availableClientsNames) {
             if (shouldStop) break;
 
             if (clientName != "Default" && !MultiInstance::isBaseClientInstalled(clientName)) {
@@ -270,8 +270,7 @@ void UpdateChecker::CheckNow(const std::string& clientName) {
 
 void UpdateChecker::CheckAllNow() {
     ThreadTask::fireAndForget([]() {
-        std::vector<std::string> clients = {"Default", "MacSploit", "Hydrogen", "Delta"};
-        for (const auto& clientName : clients) {
+        for (const auto& clientName : g_availableClientsNames) {
             if (clientName != "Default" && !MultiInstance::isBaseClientInstalled(clientName)) {
                 continue;
             }
