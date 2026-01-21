@@ -1,7 +1,5 @@
 ﻿#include "ui/ui.h"
 
-#include "progress_overlay.h"
-
 #include <algorithm>
 #include <array>
 #include <imgui.h>
@@ -55,25 +53,6 @@ namespace {
         TabInfo{"\xEF\x80\x93  Settings", Tab_Settings, RenderSettingsTab}
     };
 
-    struct AccountDisplayInfo {
-        std::string label;
-        ImVec4 color;
-    };
-
-	std::vector<AccountDisplayInfo> getSelectedAccountsInfo() {
-		std::vector<AccountDisplayInfo> result;
-		result.reserve(g_selectedAccountIds.size());
-
-		for (const int id : g_selectedAccountIds) {
-			if (const AccountData* acc = getAccountById(id)) {
-				const auto& label = acc->displayName.empty() ? acc->username : acc->displayName;
-				result.push_back({label, getStatusColor(acc->status)});
-			}
-		}
-
-		return result;
-	}
-
     void renderTabBar() {
 	    auto& style = ImGui::GetStyle();
     	style.FrameRounding = 2.5f;
@@ -103,65 +82,6 @@ namespace {
     	ImGui::PopStyleVar();
     }
 
-    void renderSelectedAccountsStatus(const std::vector<AccountDisplayInfo>& accounts) {
-        ImGui::TextUnformatted("Selected: ");
-        ImGui::SameLine(0, 0);
-
-        for (std::size_t i = 0; i < accounts.size(); ++i) {
-            if (i > 0) {
-                ImGui::TextUnformatted(", ");
-                ImGui::SameLine(0, 0);
-            }
-
-            ImGui::PushStyleColor(ImGuiCol_Text, accounts[i].color);
-            ImGui::TextUnformatted(accounts[i].label.c_str());
-            ImGui::PopStyleColor();
-
-            // Show asterisk for primary account
-            if (i == 0 && accounts.size() > 1) {
-                ImGui::SameLine(0, 0);
-                ImGui::TextUnformatted("*");
-            }
-
-            // Continue on same line if not last
-            if (i + 1 < accounts.size()) {
-                ImGui::SameLine(0, 0);
-            }
-        }
-    }
-
-    void renderStatusBar(const ImGuiViewport* viewport) {
-        const ImVec2 position(
-            viewport->WorkPos.x + viewport->WorkSize.x,
-            viewport->WorkPos.y + viewport->WorkSize.y
-        );
-
-        ImGui::SetNextWindowPos(position, ImGuiCond_Always, ImVec2(1, 1));
-
-        constexpr ImGuiWindowFlags flags =
-            ImGuiWindowFlags_NoDecoration |
-            ImGuiWindowFlags_AlwaysAutoResize |
-            ImGuiWindowFlags_NoNav |
-            ImGuiWindowFlags_NoMove |
-            ImGuiWindowFlags_NoFocusOnAppearing;
-
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8, 8));
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-
-        if (ImGui::Begin("StatusBar", nullptr, flags)) {
-            const auto selectedAccounts = getSelectedAccountsInfo();
-
-            if (selectedAccounts.empty()) {
-                ImGui::Text("Status: %s", ButtonRightStatus::Get().c_str());
-            } else {
-                renderSelectedAccountsStatus(selectedAccounts);
-            }
-        }
-
-        ImGui::End();
-        ImGui::PopStyleVar(2);
-    }
-
 }
 
 bool RenderUI() {
@@ -182,18 +102,26 @@ bool RenderUI() {
         ImGuiWindowFlags_NoScrollWithMouse;
 
     ImGui::Begin("MainAppArea", nullptr, mainFlags);
-
     renderTabBar();
-
-    renderStatusBar(viewport);
-
     ImGui::End();
 
-    ModalPopup::Render();
 	float deltaTime = ImGui::GetIO().DeltaTime;
+
+	std::vector<ButtonRightStatus::SelectedAccount> selectedAccounts;
+	selectedAccounts.reserve(g_selectedAccountIds.size());
+
+	for (const int id : g_selectedAccountIds) {
+		if (const AccountData* acc = getAccountById(id)) {
+			const auto& label = acc->displayName.empty() ? acc->username : acc->displayName;
+			selectedAccounts.push_back({label, getStatusColor(acc->status)});
+		}
+	}
+
+    ModalPopup::Render();
 	UpdateNotification::Update(deltaTime);
 	UpdateNotification::Render();
 	ProgressOverlay::Render(deltaTime);
+	ButtonRightStatus::Render(viewport, deltaTime, selectedAccounts);
 
     return exitFromMenu;
 }

@@ -521,8 +521,7 @@ namespace {
 		void joinServer(const PrivateServer& server, const std::string& cookie) {
 			auto accountPtrs = getUsableSelectedAccounts();
 			if (accountPtrs.empty()) {
-				LOG_INFO("No account selected to join server");
-				ButtonRightStatus::Error("No account selected to join server");
+				LOG_ERROR("No account selected to join server");
 				ModalPopup::AddInfo("Select an account first.");
 				return;
 			}
@@ -550,7 +549,6 @@ namespace {
 
 					if (accessCode.empty()) {
 						LOG_ERROR("Failed to get access code for private server");
-						ButtonRightStatus::Error("Failed to get access code");
 						return;
 					}
 
@@ -558,7 +556,6 @@ namespace {
 				}
 				catch (const std::exception& ex) {
 					LOG_ERROR("Failed to join private server: {}", ex.what());
-					ButtonRightStatus::Error("Failed to join server");
 				}
 			});
 		}

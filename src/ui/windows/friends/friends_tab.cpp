@@ -586,7 +586,7 @@ namespace {
     	if (ImGui::Button((std::string(ICON_JOIN) + " Launch Instance").c_str()) && canJoin) {
     		auto accountPtrs = getUsableSelectedAccounts();
     		if (accountPtrs.empty()) {
-    			ButtonRightStatus::Error("No usable accounts selected");
+    			LOG_ERROR("No usable accounts selected");
     			return;
     		}
 
@@ -603,7 +603,7 @@ namespace {
 				const auto it = pres.find(uid);
 				if (it == pres.end() || it->second.presence != "InGame" ||
 					it->second.placeId == 0 || it->second.jobId.empty()) {
-					ButtonRightStatus::Error("User is not joinable");
+					LOG_WARN("User is not joinable");
 					return;
 				}
 				launchWithAccounts(LaunchParams::followUser(std::to_string(uid)), accounts);

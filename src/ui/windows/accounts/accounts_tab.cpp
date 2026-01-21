@@ -93,7 +93,6 @@ namespace {
     void handleDoubleClick(const AccountData& account) {
         if (account.cookie.empty()) {
             LOG_WARN("Cannot open browser - cookie is empty for account: {}", account.displayName);
-            ButtonRightStatus::Error("Cookie is empty for this account");
             return;
         }
 
@@ -107,7 +106,6 @@ namespace {
     void handleHoldAction(const AccountData& account) {
         if (account.cookie.empty()) {
             LOG_WARN("Cannot open browser - cookie is empty for account: {}", account.displayName);
-            ButtonRightStatus::Error("Cookie is empty for this account");
             return;
         }
 
