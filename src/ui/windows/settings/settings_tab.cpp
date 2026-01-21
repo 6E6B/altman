@@ -17,6 +17,7 @@
 #include "system/multi_instance.h"
 #include "system/roblox_control.h"
 #include "ui/widgets/modal_popup.h"
+#include "ui/widgets/progress_overlay.h"
 #include "console/console.h"
 #include "utils/paths.h"
 #include "utils/thread_task.h"
@@ -35,16 +36,6 @@ static constexpr std::array<std::string_view, 4> g_availableClientsNames = {
     "Hydrogen",
     "Delta"
 };
-
-struct ClientInstallState {
-    bool isInstalling = false;
-    std::string currentClient;
-    float progress = 0.0f;
-    std::string statusMessage;
-};
-
-static ClientInstallState g_installState;
-static std::mutex g_installMutex;
 
 struct EnvironmentInfo {
     std::string username;
@@ -989,24 +980,8 @@ void RenderSettingsTab() {
 	}
 
 	const float availHeight = ImGui::GetContentRegionAvail().y;
-	const auto& style = ImGui::GetStyle();
-
-	float totalReserved = 0.0f;
-	const float buttonRowHeight = ImGui::GetFrameHeight() + style.ItemSpacing.y;
-	totalReserved += buttonRowHeight;
-
-	if (g_installState.isInstalling) {
-		const float progressHeight = ImGui::GetFrameHeight() * 2.0f + style.ItemSpacing.y * 2.0f;
-		totalReserved += progressHeight;
-	}
-
-	constexpr float MIN_TABLE_HEIGHT_MULTIPLIER = 6.0f;
-	const float minTableHeight = ImGui::GetFrameHeight() * MIN_TABLE_HEIGHT_MULTIPLIER;
-
-	float tableHeight = std::max(minTableHeight, availHeight - totalReserved);
-	if (availHeight <= totalReserved) {
-		tableHeight = minTableHeight;
-	}
+	constexpr float MIN_TABLE_HEIGHT = 150.0f;
+	const float tableHeight = std::max(MIN_TABLE_HEIGHT, availHeight - 50.0f);
 
 	if (ImGui::BeginTable("ClientTable", 4,
 		ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Borders | ImGuiTableFlags_ScrollY,
@@ -1072,75 +1047,68 @@ void RenderSettingsTab() {
 			ImGui::TableNextColumn();
 
 			const bool disableInstall = needsKey && g_clientKeys[clientStr].empty();
-			const bool disableButton = g_installState.isInstalling || disableInstall;
+
+			const bool isCurrentlyInstalling = ProgressOverlay::HasTask("client_" + clientStr);
+			const bool disableButton = isCurrentlyInstalling || disableInstall;
 
 			if (disableButton) {
 				ImGui::BeginDisabled();
 			}
 
 			if (isInstalled) {
-				if (ImGui::Button("Remove", ImVec2(-FLT_MIN, 0))) {
-					{
-						std::lock_guard<std::mutex> lock(g_installMutex);
-						g_installState.isInstalling = true;
-						g_installState.currentClient = clientStr;
-						g_installState.statusMessage = "Removing client...";
-					}
+			    if (ImGui::Button("Remove", ImVec2(-FLT_MIN, 0))) {
+			        ProgressOverlay::Add(
+			            "client_" + clientStr,
+			            std::format("Removing {}...", clientStr)
+			        );
 
-					ClientManager::RemoveClientAsync(clientStr, [](bool success, const std::string& message) {
-						std::lock_guard<std::mutex> lock(g_installMutex);
-						g_installState.isInstalling = false;
-						if (success) {
-							LOG_INFO(message);
-							g_installState.statusMessage = "Client removed successfully";
-						} else {
-							LOG_ERROR(message);
-							g_installState.statusMessage = std::format("Error: {}", message);
-						}
+			        ClientManager::RemoveClientAsync(clientStr, [clientStr](bool success, const std::string& message) {
+			            if (success) {
+			                LOG_INFO("{}", message);
+			                ProgressOverlay::Complete("client_" + clientStr, true, "Removed successfully");
+			            } else {
+			                LOG_ERROR("{}", message);
+			                ProgressOverlay::Complete("client_" + clientStr, false, message);
+			            }
 
-						// Refresh client list
-						MultiInstance::getAvailableClientsForUI(true);
-					});
-				}
+			            MultiInstance::getAvailableClientsForUI(true);
+			        });
+			    }
 			} else {
-				if (ImGui::Button("Install", ImVec2(-FLT_MIN, 0))) {
-					{
-						std::lock_guard<std::mutex> lock(g_installMutex);
-						g_installState.isInstalling = true;
-						g_installState.currentClient = clientStr;
-						g_installState.progress = 0.0f;
-						g_installState.statusMessage = "Starting installation...";
-					}
+			    if (ImGui::Button("Install", ImVec2(-FLT_MIN, 0))) {
+			        const std::string taskId = "client_" + clientStr;
 
-					auto progressCallback = [](float progress, const std::string& message) {
-						std::lock_guard<std::mutex> lock(g_installMutex);
-						g_installState.progress = progress;
-						g_installState.statusMessage = message;
-					};
+			        ProgressOverlay::Add(
+			            taskId,
+			            std::format("Installing {}...", clientStr),
+			            true,
+			            [clientStr]() {
+			                LOG_INFO("Installation cancelled by user: {}", clientStr);
+			            }
+			        );
 
-					auto completionCallback = [](bool success, const std::string& message) {
-						std::lock_guard<std::mutex> lock(g_installMutex);
-						g_installState.isInstalling = false;
-						if (success) {
-							LOG_INFO(message);
-							g_installState.statusMessage = "Installation complete!";
-						} else {
-							LOG_ERROR(message);
-							g_installState.statusMessage = std::format("Error: {}", message);
-						}
+			        auto progressCallback = [taskId](float progress, const std::string& message) {
+			            ProgressOverlay::Update(taskId, progress, message);
+			        };
 
-						// Refresh client list
-						MultiInstance::getAvailableClientsForUI(true);
-					};
+			        auto completionCallback = [taskId](bool success, const std::string& message) {
+			            if (success) {
+			                LOG_INFO("{}", message);
+			                ProgressOverlay::Complete(taskId, true, "Installation complete!");
+			            } else {
+			                LOG_ERROR("{}", message);
+			                ProgressOverlay::Complete(taskId, false, message);
+			            }
 
-					ClientManager::InstallClientAsync(g_installState.currentClient,
-													 progressCallback,
-													 completionCallback);
-				}
+			            MultiInstance::getAvailableClientsForUI(true);
+			        };
 
-				if (disableInstall && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-					ImGui::SetTooltip("Please enter a key before installing");
-				}
+			        ClientManager::InstallClientAsync(clientStr, progressCallback, completionCallback);
+			    }
+
+			    if (disableInstall && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+			        ImGui::SetTooltip("Please enter a key before installing");
+			    }
 			}
 
 			if (disableButton) {
@@ -1154,16 +1122,6 @@ void RenderSettingsTab() {
 	}
 
 	ImGui::Separator();
-
-	{
-		std::lock_guard<std::mutex> lock(g_installMutex);
-		if (g_installState.isInstalling) {
-			ImGui::Separator();
-			ImGui::Text("Installing %s...", g_installState.currentClient.c_str());
-			ImGui::ProgressBar(g_installState.progress, ImVec2(-1, 0));
-			ImGui::TextWrapped("%s", g_installState.statusMessage.c_str());
-		}
-	}
 
     ImGui::Spacing();
 

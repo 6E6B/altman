@@ -1,13 +1,15 @@
 ﻿#include "ui/ui.h"
 
-#include <imgui.h>
-#include <string>
-#include <string_view>
-#include <vector>
+#include "progress_overlay.h"
+
 #include <algorithm>
 #include <array>
+#include <imgui.h>
 #include <ranges>
+#include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 #include "accounts/accounts.h"
 #include "ui/windows/avatar/inventory.h"
@@ -23,8 +25,9 @@
 #include "network/roblox/social.h"
 
 #include "ui/windows/settings/settings.h"
-#include "widgets/modal_popup.h"
-#include "widgets/notifications.h"
+#include "ui/widgets/modal_popup.h"
+#include "ui/widgets/notifications.h"
+#include "ui/widgets/progress_overlay.h"
 
 namespace {
     constexpr std::string_view ICON_ACCOUNTS = "\xEF\x80\x87";
@@ -189,6 +192,7 @@ bool RenderUI() {
 	float deltaTime = ImGui::GetIO().DeltaTime;
 	UpdateNotification::Update(deltaTime);
 	UpdateNotification::Render();
+	ProgressOverlay::Render(deltaTime);
 
     return exitFromMenu;
 }
