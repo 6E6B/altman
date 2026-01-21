@@ -207,7 +207,7 @@ namespace {
 	void handleJoinByUser(std::string userInput) {
     	auto accountPtrs = getUsableSelectedAccounts();
     	if (accountPtrs.empty()) {
-    		Status::Error("No usable accounts selected");
+    		ButtonRightStatus::Error("No usable accounts selected");
     		return;
     	}
 
@@ -223,7 +223,7 @@ namespace {
 			try {
 				UserSpecifier spec{};
 				if (!parseUserSpecifier(userInput, spec)) {
-					Status::Error("Enter username or userId (id=000)");
+					ButtonRightStatus::Error("Enter username or userId (id=000)");
 					return;
 				}
 
@@ -233,14 +233,14 @@ namespace {
 				const auto it = presenceMap.find(uid);
 				if (it == presenceMap.end() || it->second.presence != "InGame" ||
 					it->second.placeId == 0 || it->second.jobId.empty()) {
-					Status::Error("User is not joinable");
+					ButtonRightStatus::Error("User is not joinable");
 					return;
 				}
 
 				launchWithAccounts(LaunchParams::gameJob(it->second.placeId, it->second.jobId), accounts);
 			} catch (const std::exception& e) {
 				LOG_ERROR("Join by username failed: {}", e.what());
-				Status::Error("Failed to join by username");
+				ButtonRightStatus::Error("Failed to join by username");
 			}
 		});
     }

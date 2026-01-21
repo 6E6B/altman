@@ -522,7 +522,7 @@ namespace {
 			auto accountPtrs = getUsableSelectedAccounts();
 			if (accountPtrs.empty()) {
 				LOG_INFO("No account selected to join server");
-				Status::Error("No account selected to join server");
+				ButtonRightStatus::Error("No account selected to join server");
 				ModalPopup::AddInfo("Select an account first.");
 				return;
 			}
@@ -550,7 +550,7 @@ namespace {
 
 					if (accessCode.empty()) {
 						LOG_ERROR("Failed to get access code for private server");
-						Status::Error("Failed to get access code");
+						ButtonRightStatus::Error("Failed to get access code");
 						return;
 					}
 
@@ -558,7 +558,7 @@ namespace {
 				}
 				catch (const std::exception& ex) {
 					LOG_ERROR("Failed to join private server: {}", ex.what());
-					Status::Error("Failed to join server");
+					ButtonRightStatus::Error("Failed to join server");
 				}
 			});
 		}

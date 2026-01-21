@@ -2,7 +2,7 @@
 
 #include <string>
 
-namespace Status {
+namespace ButtonRightStatus {
 	void Set(std::string text);
 	void Error(std::string text);
 	std::string Get();

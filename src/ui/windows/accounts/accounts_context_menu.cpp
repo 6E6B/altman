@@ -650,7 +650,7 @@ void RenderAccountContextMenu(AccountData& account, const std::string& uniqueCon
 					for (const int id : idsToRemove) {
 						g_selectedAccountIds.erase(id);
 					}
-					Status::Set("Deleted selected accounts");
+					ButtonRightStatus::Set("Deleted selected accounts");
 					Data::SaveAccounts();
 				}
 			);
@@ -671,7 +671,7 @@ void RenderAccountContextMenu(AccountData& account, const std::string& uniqueCon
 					std::erase_if(g_accounts, [id](const auto& acc) { return acc.id == id; });
 					invalidateAccountIndex();
 					g_selectedAccountIds.erase(id);
-					Status::Set("Deleted account " + displayName);
+					ButtonRightStatus::Set("Deleted account " + displayName);
 					Data::SaveAccounts();
 					LOG_INFO("Successfully deleted account: {} (ID: {})", displayName, id);
 				}

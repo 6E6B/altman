@@ -6,7 +6,7 @@
 #include <chrono>
 #include <format>
 
-namespace Status {
+namespace ButtonRightStatus {
     namespace {
         constexpr int COUNTDOWN_SECONDS = 5;
         constexpr const char* IDLE_TEXT = "Idle";

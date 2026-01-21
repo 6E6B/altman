@@ -151,7 +151,7 @@ namespace {
             const auto selectedAccounts = getSelectedAccountsInfo();
 
             if (selectedAccounts.empty()) {
-                ImGui::Text("Status: %s", Status::Get().c_str());
+                ImGui::Text("Status: %s", ButtonRightStatus::Get().c_str());
             } else {
                 renderSelectedAccountsStatus(selectedAccounts);
             }
