@@ -23,16 +23,15 @@ namespace RobloxControl {
 
 #ifdef _WIN32
     namespace {
-        std::string WStringToString(const std::wstring& wstr) {
-            if (wstr.empty())
-                return std::string();
-            int size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], static_cast<int>(wstr.size()),
-                                                  nullptr, 0, nullptr, nullptr);
-            std::string strTo(size_needed, 0);
-            WideCharToMultiByte(CP_UTF8, 0, &wstr[0], static_cast<int>(wstr.size()), &strTo[0],
-                                size_needed, nullptr, nullptr);
-            return strTo;
-        }
+    	std::string WStringToString(std::wstring_view wstr) {
+    		if (wstr.empty()) return {};
+    		int size_needed = WideCharToMultiByte(CP_UTF8, 0, wstr.data(),
+				static_cast<int>(wstr.size()), nullptr, 0, nullptr, nullptr);
+    		std::string result(size_needed, '\0');
+    		WideCharToMultiByte(CP_UTF8, 0, wstr.data(),
+				static_cast<int>(wstr.size()), result.data(), size_needed, nullptr, nullptr);
+    		return result;
+    	}
 
         bool DeleteFileWithRetry(const std::wstring& path,
                                 int attempts = 50,
@@ -42,13 +41,12 @@ namespace RobloxControl {
                     return true;
                 DWORD err = GetLastError();
                 if (err != ERROR_SHARING_VIOLATION && err != ERROR_ACCESS_DENIED) {
-                    LOG_ERROR(std::format("Failed to delete file: {} (Error: {})",
-                        WStringToString(path), err));
+                    LOG_ERROR("Failed to delete file: {} (Error: {})", WStringToString(path), err);
                     return false;
                 }
                 Sleep(delayMs);
             }
-            LOG_ERROR(std::format("Timed out waiting to delete file: {}", WStringToString(path)));
+            LOG_ERROR("Timed out waiting to delete file: {}", WStringToString(path));
             return false;
         }
 
@@ -60,13 +58,12 @@ namespace RobloxControl {
                     return true;
                 DWORD err = GetLastError();
                 if (err != ERROR_SHARING_VIOLATION && err != ERROR_ACCESS_DENIED) {
-                    LOG_ERROR(std::format("Failed to remove directory: {} (Error: {})",
-                        WStringToString(path), err));
+                    LOG_ERROR("Failed to remove directory: {} (Error: {})", WStringToString(path), err);
                     return false;
                 }
                 Sleep(delayMs);
             }
-            LOG_ERROR(std::format("Timed out waiting to remove directory: {}", WStringToString(path)));
+            LOG_ERROR("Timed out waiting to remove directory: {}", WStringToString(path));
             return false;
         }
 
@@ -78,11 +75,9 @@ namespace RobloxControl {
             if (hFind == INVALID_HANDLE_VALUE) {
                 DWORD error = GetLastError();
                 if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
-                    LOG_INFO(std::format("ClearDirectoryContents: Directory to clear not found or is empty: {}",
-                        WStringToString(directoryPath)));
+                    LOG_INFO("ClearDirectoryContents: Directory to clear not found or is empty: {}", WStringToString(directoryPath));
                 } else {
-                    LOG_ERROR(std::format("ClearDirectoryContents: Failed to find first file in directory: {} (Error: {})",
-                        WStringToString(directoryPath), error));
+                    LOG_ERROR("ClearDirectoryContents: Failed to find first file in directory: {} (Error: {})", WStringToString(directoryPath), error);
                 }
                 return;
             }
@@ -99,19 +94,15 @@ namespace RobloxControl {
                     ClearDirectoryContents(itemFullPath);
 
                     if (RemoveDirectoryWithRetry(itemFullPath)) {
-                        LOG_INFO(std::format("ClearDirectoryContents: Removed sub-directory: {}",
-                            WStringToString(itemFullPath)));
+                        LOG_INFO("ClearDirectoryContents: Removed sub-directory: {}", WStringToString(itemFullPath));
                     } else {
-                        LOG_ERROR(std::format("ClearDirectoryContents: Failed to remove sub-directory: {}",
-                            WStringToString(itemFullPath)));
+                        LOG_ERROR("ClearDirectoryContents: Failed to remove sub-directory: {}", WStringToString(itemFullPath));
                     }
                 } else {
                     if (DeleteFileWithRetry(itemFullPath)) {
-                        LOG_INFO(std::format("ClearDirectoryContents: Deleted file: {}",
-                            WStringToString(itemFullPath)));
+                        LOG_INFO("ClearDirectoryContents: Deleted file: {}", WStringToString(itemFullPath));
                     } else {
-                        LOG_ERROR(std::format("ClearDirectoryContents: Failed to delete file: {}",
-                            WStringToString(itemFullPath)));
+                        LOG_ERROR("ClearDirectoryContents: Failed to delete file: {}", WStringToString(itemFullPath));
                     }
                 }
             } while (FindNextFileW(hFind, &findFileData) != 0);
@@ -120,8 +111,7 @@ namespace RobloxControl {
 
             DWORD lastError = GetLastError();
             if (lastError != ERROR_NO_MORE_FILES) {
-                LOG_ERROR(std::format("ClearDirectoryContents: Error during file iteration in directory: {} (Error: {})",
-                    WStringToString(directoryPath), lastError));
+                LOG_ERROR("ClearDirectoryContents: Error during file iteration in directory: {} (Error: {})", WStringToString(directoryPath), lastError);
             }
         }
     }
@@ -159,16 +149,14 @@ namespace RobloxControl {
                     if (hProc) {
                         TerminateProcess(hProc, 0);
                         CloseHandle(hProc);
-                        LOG_INFO(std::format("Terminated Roblox process: {}", pe.th32ProcessID));
+                        LOG_INFO("Terminated Roblox process: {}", pe.th32ProcessID);
                     } else {
-                        LOG_ERROR(std::format("Failed to open Roblox process for termination: {} (Error: {})",
-                            pe.th32ProcessID, GetLastError()));
+                        LOG_ERROR("Failed to open Roblox process for termination: {} (Error: {})", pe.th32ProcessID, GetLastError());
                     }
                 }
             } while (Process32Next(hSnap, &pe));
         } else {
-            LOG_ERROR(std::format("Process32First failed when trying to kill Roblox. (Error: {})",
-                GetLastError()));
+            LOG_ERROR("Process32First failed when trying to kill Roblox. (Error: {})", GetLastError());
         }
         CloseHandle(hSnap);
         LOG_INFO("Kill Roblox process completed.");
@@ -190,34 +178,34 @@ namespace RobloxControl {
         };
 
         std::wstring localStoragePath = localAppDataPath_ws + L"\\Roblox\\LocalStorage";
-        LOG_INFO(std::format("Processing directory for full removal: {}", WStringToString(localStoragePath)));
+        LOG_INFO("Processing directory for full removal: {}", WStringToString(localStoragePath));
         if (directoryExists(localStoragePath)) {
             ClearDirectoryContents(localStoragePath);
             if (RemoveDirectoryWithRetry(localStoragePath)) {
-                LOG_INFO(std::format("Successfully removed directory: {}", WStringToString(localStoragePath)));
+                LOG_INFO("Successfully removed directory: {}", WStringToString(localStoragePath));
             } else {
-                LOG_ERROR(std::format("Failed to remove directory: {}", WStringToString(localStoragePath)));
+                LOG_ERROR("Failed to remove directory: {}", WStringToString(localStoragePath));
             }
         } else {
-            LOG_INFO(std::format("Directory not found, skipping: {}", WStringToString(localStoragePath)));
+            LOG_INFO("Directory not found, skipping: {}", WStringToString(localStoragePath));
         }
 
         std::wstring otaPatchBackupsPath = localAppDataPath_ws + L"\\Roblox\\OTAPatchBackups";
-        LOG_INFO(std::format("Processing directory for full removal: {}", WStringToString(otaPatchBackupsPath)));
+        LOG_INFO("Processing directory for full removal: {}", WStringToString(otaPatchBackupsPath));
         if (directoryExists(otaPatchBackupsPath)) {
             ClearDirectoryContents(otaPatchBackupsPath);
             if (RemoveDirectoryWithRetry(otaPatchBackupsPath)) {
-                LOG_INFO(std::format("Successfully removed directory: {}", WStringToString(otaPatchBackupsPath)));
+                LOG_INFO("Successfully removed directory: {}", WStringToString(otaPatchBackupsPath));
             } else {
-                LOG_ERROR(std::format("Failed to remove directory: {}", WStringToString(otaPatchBackupsPath)));
+                LOG_ERROR("Failed to remove directory: {}", WStringToString(otaPatchBackupsPath));
             }
         } else {
-            LOG_INFO(std::format("Directory not found, skipping: {}", WStringToString(otaPatchBackupsPath)));
+            LOG_INFO("Directory not found, skipping: {}", WStringToString(otaPatchBackupsPath));
         }
 
         std::wstring robloxBasePath = localAppDataPath_ws + L"\\Roblox";
         std::wstring rbxStoragePattern = robloxBasePath + L"\\rbx-storage.*";
-        LOG_INFO(std::format("Attempting to delete files matching pattern: {}", WStringToString(rbxStoragePattern)));
+        LOG_INFO("Attempting to delete files matching pattern: {}", WStringToString(rbxStoragePattern));
 
         WIN32_FIND_DATAW findRbxData;
         HANDLE hFindRbx = FindFirstFileW(rbxStoragePattern.c_str(), &findRbxData);
@@ -228,9 +216,9 @@ namespace RobloxControl {
                     wcscmp(findRbxData.cFileName, L"..") != 0) {
                     std::wstring filePathToDelete = robloxBasePath + L"\\" + findRbxData.cFileName;
                     if (DeleteFileWithRetry(filePathToDelete)) {
-                        LOG_INFO(std::format("Deleted file: {}", WStringToString(filePathToDelete)));
+                        LOG_INFO("Deleted file: {}", WStringToString(filePathToDelete));
                     } else {
-                        LOG_ERROR(std::format("Failed to delete file: {}", WStringToString(filePathToDelete)));
+                        LOG_ERROR("Failed to delete file: {}", WStringToString(filePathToDelete));
                     }
                 }
             } while (FindNextFileW(hFindRbx, &findRbxData) != 0);
@@ -238,9 +226,9 @@ namespace RobloxControl {
         } else {
             DWORD error = GetLastError();
             if (error == ERROR_FILE_NOT_FOUND) {
-                LOG_INFO(std::format("No rbx-storage.* files found in: {}", WStringToString(robloxBasePath)));
+                LOG_INFO("No rbx-storage.* files found in: {}", WStringToString(robloxBasePath));
             } else {
-                LOG_ERROR(std::format("Failed to search for rbx-storage.* files: {}", error));
+                LOG_ERROR("Failed to search for rbx-storage.* files: {}", error);
             }
         }
 
@@ -248,18 +236,21 @@ namespace RobloxControl {
     }
 
 #elif __APPLE__
-    bool IsRobloxRunning() {
-        FILE* pipe = popen("pgrep -x 'RobloxPlayer'", "r");
-        if (!pipe) {
-            LOG_ERROR("Failed to execute pgrep command");
-            return false;
-        }
+	bool IsRobloxRunning() {
+	    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
+    	size_t size = 0;
+    	if (sysctl(mib, 4, nullptr, &size, nullptr, 0) < 0)
+    		return false;
 
-        char buffer[128];
-        bool found = (fgets(buffer, sizeof(buffer), pipe) != nullptr);
-        pclose(pipe);
+    	std::vector<kinfo_proc> procs(size / sizeof(kinfo_proc));
+    	if (sysctl(mib, 4, procs.data(), &size, nullptr, 0) < 0)
+    		return false;
 
-        return found;
+    	for (const auto& proc : procs) {
+    		if (std::strcmp(proc.kp_proc.p_comm, "RobloxPlayer") == 0)
+    			return true;
+    	}
+    	return false;
     }
 
     void KillRobloxProcesses() {
@@ -283,8 +274,6 @@ namespace RobloxControl {
             return;
         }
 
-        namespace fs = std::filesystem;
-
         std::vector<std::string> cachePaths = {
             std::string(home) + "/Library/Caches/com.roblox.RobloxPlayer",
             std::string(home) + "/Library/Roblox/LocalStorage",
@@ -297,10 +286,10 @@ namespace RobloxControl {
 
         for (const auto& path : cachePaths) {
             try {
-                if (fs::exists(path)) {
+                if (std::filesystem::exists(path)) {
                     LOG_INFO("Clearing cache directory: {}", path);
 
-                    std::uintmax_t removed = fs::remove_all(path);
+                    std::uintmax_t removed = std::filesystem::remove_all(path);
 
                     if (removed > 0) {
                         LOG_INFO("Removed {} items from: {}", removed, path);
@@ -310,23 +299,23 @@ namespace RobloxControl {
                 } else {
                     LOG_INFO("Cache directory not found (this is normal): {}", path);
                 }
-            } catch (const fs::filesystem_error& e) {
+            } catch (const std::filesystem::filesystem_error& e) {
                 LOG_ERROR("Failed to clear cache at {}: {}", path, e.what());
             }
         }
 
-        fs::path baseDir = std::string(home) + "/Library/Roblox/";
-        if (!fs::exists(baseDir) || !fs::is_directory(baseDir)) {
+        std::filesystem::path baseDir = std::string(home) + "/Library/Roblox/";
+        if (!std::filesystem::exists(baseDir) || !std::filesystem::is_directory(baseDir)) {
             LOG_INFO("Roblox base directory not found. Skipping rbx-storage cleanup.");
         } else {
-            for (const auto& entry : fs::directory_iterator(baseDir)) {
+            for (const auto& entry : std::filesystem::directory_iterator(baseDir)) {
                 if (!entry.is_regular_file())
                     continue;
 
                 std::string filename = entry.path().filename().string();
                 if (filename.rfind("rbx-storage", 0) == 0) {
                     try {
-                        fs::remove(entry.path());
+                        std::filesystem::remove(entry.path());
                         LOG_INFO("Deleted: {}", entry.path().string());
                     } catch (const std::exception& e) {
                         LOG_ERROR("Failed to delete: {} ({})",
