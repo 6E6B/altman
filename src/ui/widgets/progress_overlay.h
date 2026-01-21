@@ -23,6 +23,16 @@ namespace ProgressOverlay {
 		bool success = true;
 		float completedTimer = 0.0f;
 	};
+
+	struct TaskInfo {
+		std::string id;
+		std::string title;
+		std::string detail;
+		float progress = 0.0f;
+		bool completed = false;
+		bool success = true;
+	};
+
 	bool HasTask(const std::string& id);
 
 	void Add(const std::string& id, const std::string& title, bool cancellable = false,
@@ -37,5 +47,7 @@ namespace ProgressOverlay {
 	void Render(float deltaTime);
 
 	bool HasActiveTasks();
+
+	std::vector<TaskInfo> GetActiveTasks();
 
 }

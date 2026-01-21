@@ -223,4 +223,26 @@ bool HasActiveTasks() {
     return !g_tasks.empty();
 }
 
+std::vector<TaskInfo> GetActiveTasks() {
+	std::lock_guard<std::mutex> lock(g_mutex);
+
+	std::vector<TaskInfo> result;
+	result.reserve(g_tasks.size());
+
+	for (const auto& task : g_tasks) {
+		if (!task.removing) {
+			TaskInfo info;
+			info.id = task.id;
+			info.title = task.title;
+			info.detail = task.detail;
+			info.progress = task.progress;
+			info.completed = task.completed;
+			info.success = task.success;
+			result.push_back(std::move(info));
+		}
+	}
+
+	return result;
+}
+
 }

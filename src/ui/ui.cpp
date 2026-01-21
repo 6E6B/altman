@@ -28,6 +28,7 @@
 #include "ui/widgets/modal_popup.h"
 #include "ui/widgets/notifications.h"
 #include "ui/widgets/progress_overlay.h"
+#include "ui/widgets/bottom_right_status.h"
 
 namespace {
     constexpr std::string_view ICON_ACCOUNTS = "\xEF\x80\x87";
