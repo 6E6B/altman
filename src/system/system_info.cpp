@@ -72,7 +72,14 @@ bool IsRunningUnderEmulation() {
         return false;
     }
 
-    return processMachine != nativeMachine;
+	if (processMachine == IMAGE_FILE_MACHINE_UNKNOWN)
+		return false;
+
+	if (processMachine == IMAGE_FILE_MACHINE_ARM64 &&
+		nativeMachine == IMAGE_FILE_MACHINE_ARM64)
+		return false;
+
+	return true;
 #elif __APPLE__
     return IsRunningUnderRosetta();
 #else
