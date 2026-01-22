@@ -394,6 +394,26 @@ void startAccountRefreshLoop() {
 }
 
 void initializeAutoUpdater() {
+    /*
+        ## GitHub Release Setup
+
+        For delta updates to work, structure releases like this:
+
+        Release v2.0.0
+        ├── AltMan-Windows.exe          (full installer)
+        ├── AltMan-macOS.dmg            (full installer)
+        ├── AltMan-Linux.AppImage       (full installer)
+        ├── AltMan-Delta-1.9.0-to-2.0.0.patch    (delta from 1.9.0)
+        ├── AltMan-Delta-1.8.0-to-2.0.0.patch    (delta from 1.8.0)
+        └── AltMan-Windows-beta.exe     (beta channel)
+
+
+        Creating Delta Patches
+        Windows (xdelta3):
+        ``bash xdelta3 -e -s AltMan-v1.9.0.exe AltMan-v2.0.0.exe AltMan-Delta-1.9.0-to-2.0.0.patch```
+        Unix (bsdiff):
+        ```bash bsdiff AltMan-v1.9.0.AppImage AltMan-v2.0.0.AppImage AltMan-Delta-1.9.0-to-2.0.0.patch```
+     */
     AutoUpdater::Initialize();
     AutoUpdater::SetBandwidthLimit(5_MB);
     AutoUpdater::SetShowNotifications(true);

@@ -7,6 +7,8 @@
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <sstream>
+#include <chrono>
+#include <thread>
 
 namespace HttpClient {
 
@@ -211,6 +213,190 @@ bool download(
     }
 
     return true;
+}
+
+StreamingDownloadResult download_streaming(
+    const std::string& url,
+    const std::string& output_path,
+    std::vector<std::pair<std::string, std::string>> headers,
+    size_t resumeOffset,
+    ExtendedProgressCallback progress_cb,
+    DownloadControl control
+) {
+    StreamingDownloadResult result;
+
+    std::ios::openmode mode = std::ios::binary;
+    if (resumeOffset > 0) {
+        mode |= std::ios::app;
+    }
+
+    std::ofstream file(output_path, mode);
+    if (!file) {
+        result.error = std::format("Failed to open file: {}", output_path);
+        LOG_ERROR("{}", result.error);
+        return result;
+    }
+
+    cpr::Header cprHeaders;
+    for (const auto& [k, v] : headers) {
+        cprHeaders.emplace(k, v);
+    }
+
+    if (resumeOffset > 0) {
+        cprHeaders.emplace("Range", std::format("bytes={}-", resumeOffset));
+    }
+
+    struct DownloadState {
+        std::ofstream* file;
+        std::atomic<bool>* shouldCancel;
+        std::atomic<bool>* isPaused;
+        size_t bandwidthLimit;
+        size_t resumeOffset;
+        size_t bytesWritten{0};
+        size_t bytesThisSecond{0};
+        size_t totalBytes{0};
+        std::chrono::steady_clock::time_point startTime;
+        std::chrono::steady_clock::time_point secondStart;
+        std::chrono::steady_clock::time_point lastProgressReport;
+        ExtendedProgressCallback progressCb;
+        bool cancelled{false};
+    };
+
+    DownloadState state{
+        .file = &file,
+        .shouldCancel = control.shouldCancel,
+        .isPaused = control.isPaused,
+        .bandwidthLimit = control.bandwidthLimit,
+        .resumeOffset = resumeOffset,
+        .startTime = std::chrono::steady_clock::now(),
+        .secondStart = std::chrono::steady_clock::now(),
+        .lastProgressReport = std::chrono::steady_clock::now(),
+        .progressCb = progress_cb
+    };
+
+    cpr::WriteCallback writeCallback{[&state](const std::string_view& data, intptr_t) -> bool {
+        if (state.shouldCancel && state.shouldCancel->load()) {
+            state.cancelled = true;
+            return false;
+        }
+
+        while (state.isPaused && state.isPaused->load()) {
+            if (state.shouldCancel && state.shouldCancel->load()) {
+                state.cancelled = true;
+                return false;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+
+        if (state.bandwidthLimit > 0) {
+            const auto now = std::chrono::steady_clock::now();
+            const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - state.secondStart).count();
+
+            if (elapsedMs >= 1000) {
+                state.bytesThisSecond = 0;
+                state.secondStart = now;
+            }
+
+            if (state.bytesThisSecond + data.size() > state.bandwidthLimit) {
+                const auto sleepMs = 1000 - elapsedMs;
+                if (sleepMs > 0) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(sleepMs));
+                }
+                state.bytesThisSecond = 0;
+                state.secondStart = std::chrono::steady_clock::now();
+            }
+            state.bytesThisSecond += data.size();
+        }
+
+        state.file->write(data.data(), static_cast<std::streamsize>(data.size()));
+        if (!state.file->good()) {
+            return false;
+        }
+
+        state.bytesWritten += data.size();
+
+        if (state.progressCb) {
+            const auto now = std::chrono::steady_clock::now();
+            const auto sinceLastReport = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - state.lastProgressReport).count();
+
+            if (sinceLastReport >= 100) {
+                const auto elapsedSecs = std::chrono::duration_cast<std::chrono::seconds>(
+                    now - state.startTime).count();
+                const size_t bytesPerSecond = elapsedSecs > 0
+                    ? state.bytesWritten / static_cast<size_t>(elapsedSecs)
+                    : 0;
+
+                const size_t totalDownloaded = state.resumeOffset + state.bytesWritten;
+                state.progressCb(totalDownloaded, state.totalBytes, bytesPerSecond);
+                state.lastProgressReport = now;
+            }
+        }
+
+        return true;
+    }};
+
+    cpr::ProgressCallback progressCallback{
+        [&state](cpr::cpr_pf_arg_t downloadTotal, cpr::cpr_pf_arg_t,
+                 cpr::cpr_pf_arg_t, cpr::cpr_pf_arg_t, intptr_t) -> bool {
+            if (downloadTotal > 0 && state.totalBytes == 0) {
+                state.totalBytes = state.resumeOffset + static_cast<size_t>(downloadTotal);
+            }
+            return !(state.shouldCancel && state.shouldCancel->load());
+        }
+    };
+
+    cpr::Response r = cpr::Get(
+        cpr::Url{url},
+        cprHeaders,
+        writeCallback,
+        progressCallback,
+        cpr::Redirect(10L)
+    );
+
+    file.close();
+
+    result.status_code = static_cast<int>(r.status_code);
+    result.wasCancelled = state.cancelled;
+    result.bytesDownloaded = state.resumeOffset + state.bytesWritten;
+
+    if (state.totalBytes == 0) {
+        if (auto it = r.header.find("Content-Range"); it != r.header.end()) {
+            if (auto slashPos = it->second.rfind('/'); slashPos != std::string::npos) {
+                try {
+                    result.totalBytes = std::stoull(it->second.substr(slashPos + 1));
+                } catch (...) {
+                    result.totalBytes = result.bytesDownloaded;
+                }
+            }
+        }
+        else if (auto it = r.header.find("Content-Length"); it != r.header.end()) {
+            try {
+                result.totalBytes = resumeOffset + std::stoull(it->second);
+            } catch (...) {
+                result.totalBytes = result.bytesDownloaded;
+            }
+        } else {
+            result.totalBytes = result.bytesDownloaded;
+        }
+    } else {
+        result.totalBytes = state.totalBytes;
+    }
+
+    if (r.error.code != cpr::ErrorCode::OK && !state.cancelled) {
+        result.error = r.error.message;
+        LOG_ERROR("Download error: {}", result.error);
+    }
+
+    if (result.status_code != 200 && result.status_code != 206 && !state.cancelled) {
+        if (result.error.empty()) {
+            result.error = std::format("HTTP error: {}", result.status_code);
+        }
+        LOG_ERROR("Download failed: HTTP {}", result.status_code);
+    }
+
+    return result;
 }
 
 class DownloadSession::Impl {

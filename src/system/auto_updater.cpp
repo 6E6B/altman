@@ -15,7 +15,6 @@
 #include "utils/thread_task.h"
 #include "utils/paths.h"
 #include "network/http.h"
-#include "utils/thread_task.h"
 #include "ui/widgets/modal_popup.h"
 #include "ui/widgets/notifications.h"
 
@@ -25,15 +24,15 @@
     #include <unistd.h>
     #ifdef __APPLE__
         #include <mach-o/dyld.h>
-		#include <Security/Security.h>
-		#include <CoreFoundation/CoreFoundation.h>
-		#include <spawn.h>
-		extern char **environ;
+        #include <Security/Security.h>
+        #include <CoreFoundation/CoreFoundation.h>
+        #include <spawn.h>
+        extern char **environ;
     #endif
 #endif
 
 std::filesystem::path UpdaterConfig::GetConfigPath() {
-	return AltMan::Paths::Config("updater.json");
+    return AltMan::Paths::Config("updater.json");
 }
 
 void UpdaterConfig::Save() const {
@@ -191,48 +190,48 @@ void AutoUpdater::LaunchUpdateScript() {
     const auto scriptPath = GetUpdateScriptPath();
 
 #ifdef _WIN32
-	std::wstring cmdLine = L"cmd.exe /C \"" + scriptPath.wstring() + L"\"";
+    std::wstring cmdLine = L"cmd.exe /C \"" + scriptPath.wstring() + L"\"";
 
-	STARTUPINFOW si{};
-	PROCESS_INFORMATION pi{};
-	si.cb = sizeof(si);
-	si.dwFlags = STARTF_USESHOWWINDOW;
-	si.wShowWindow = SW_HIDE;
+    STARTUPINFOW si{};
+    PROCESS_INFORMATION pi{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
 
-	if (!CreateProcessW(
-		nullptr,
-		cmdLine.data(),
-		nullptr,
-		nullptr,
-		FALSE,
-		CREATE_NO_WINDOW,
-		nullptr,
-		nullptr,
-		&si,
-		&pi
-	)) {
-		return;
-	}
+    if (!CreateProcessW(
+        nullptr,
+        cmdLine.data(),
+        nullptr,
+        nullptr,
+        FALSE,
+        CREATE_NO_WINDOW,
+        nullptr,
+        nullptr,
+        &si,
+        &pi
+    )) {
+        return;
+    }
 
-	CloseHandle(pi.hProcess);
-	CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
 #else
-	pid_t pid;
-	std::string path = scriptPath.string();
-	char* argv[] = {
-		const_cast<char*>(path.c_str()),
-		nullptr
-	};
+    pid_t pid;
+    std::string path = scriptPath.string();
+    char* argv[] = {
+        const_cast<char*>(path.c_str()),
+        nullptr
+    };
 
-	if (posix_spawn(
-			&pid,
-			path.c_str(),
-			nullptr,
-			nullptr,
-			argv,
-			environ
-		) != 0) {
-		}
+    if (posix_spawn(
+            &pid,
+            path.c_str(),
+            nullptr,
+            nullptr,
+            argv,
+            environ
+        ) != 0) {
+        }
 #endif
 }
 
@@ -373,15 +372,15 @@ void AutoUpdater::SetShowNotifications(bool show) noexcept {
 }
 
 void AutoUpdater::PauseDownload() noexcept {
-    currentDownload.isPaused = true;
+    currentDownload.isPaused.store(true);
 }
 
 void AutoUpdater::ResumeDownload() noexcept {
-    currentDownload.isPaused = false;
+    currentDownload.isPaused.store(false);
 }
 
 void AutoUpdater::CancelDownload() noexcept {
-    currentDownload.shouldCancel = true;
+    currentDownload.shouldCancel.store(true);
 }
 
 const DownloadState& AutoUpdater::GetDownloadState() noexcept {
@@ -613,139 +612,107 @@ bool AutoUpdater::DownloadFileWithResume(std::string_view url, const std::filesy
                                   std::function<void(int, size_t, size_t)> progressCallback) {
     LOG_INFO("Downloading: {}", url);
 
-    currentDownload.url = url;
+    currentDownload.url = std::string(url);
     currentDownload.outputPath = outputPath.string();
-    currentDownload.isPaused = false;
-    currentDownload.shouldCancel = false;
-
-    size_t startOffset = 0;
-    std::ios::openmode mode = std::ios::binary;
-
-    if (config.resumeFilePath == outputPath && config.resumeOffset > 0) {
-       if (std::filesystem::exists(outputPath)) {
-          startOffset = config.resumeOffset;
-          mode |= std::ios::app;
-          LOG_INFO("Resuming download from byte {}", startOffset);
-       }
-    }
-
-    std::vector<std::pair<std::string, std::string>> headers = {
-       {"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"}
-    };
-
-    if (startOffset > 0) {
-       headers.emplace_back("Range", std::format("bytes={}-", startOffset));
-    }
-
-    auto resp = HttpClient::get(std::string(url), headers);
-
-    if (resp.status_code != 200 && resp.status_code != 206) {
-       LOG_INFO("Download failed: HTTP {}", resp.status_code);
-       return false;
-    }
-
-    std::ofstream file(outputPath, mode);
-    if (!file.is_open()) {
-       LOG_INFO("Failed to open file: {}", outputPath.string());
-       return false;
-    }
-
-    const size_t contentLength = resp.text.size();
-    currentDownload.totalBytes = contentLength + startOffset;
-    currentDownload.downloadedBytes = startOffset;
+    currentDownload.isPaused.store(false);
+    currentDownload.shouldCancel.store(false);
+    currentDownload.isComplete.store(false);
+    currentDownload.downloadedBytes.store(0);
+    currentDownload.totalBytes.store(0);
     currentDownload.startTime = std::chrono::steady_clock::now();
     currentDownload.lastUpdateTime = currentDownload.startTime;
 
-    const size_t chunkSize = config.bandwidthLimit > 0
-      ? std::min(1_MB, config.bandwidthLimit)
-      : 1_MB;
+    size_t startOffset = 0;
+    if (config.resumeFilePath == outputPath && config.resumeOffset > 0) {
+        if (std::filesystem::exists(outputPath)) {
+            startOffset = config.resumeOffset;
+            LOG_INFO("Resuming download from byte {}", startOffset);
+        }
+    } else if (std::filesystem::exists(outputPath)) {
+        std::filesystem::remove(outputPath);
+    }
 
+    std::vector<std::pair<std::string, std::string>> headers = {
+        {"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"}
+    };
+
+    HttpClient::DownloadControl control{
+        .shouldCancel = &currentDownload.shouldCancel,
+        .isPaused = &currentDownload.isPaused,
+        .bandwidthLimit = config.bandwidthLimit
+    };
+
+    HttpClient::ExtendedProgressCallback extendedProgress = nullptr;
     if (progressCallback) {
-       const int percentage = startOffset > 0
-         ? static_cast<int>((startOffset * 100) / currentDownload.totalBytes)
-         : 0;
+        extendedProgress = [progressCallback](size_t downloaded, size_t total, size_t bytesPerSecond) {
+            currentDownload.downloadedBytes.store(downloaded);
+            currentDownload.totalBytes.store(total);
+            currentDownload.lastUpdateTime = std::chrono::steady_clock::now();
 
-       ThreadTask::RunOnMain([progressCallback, percentage, total = currentDownload.totalBytes]() {
-         progressCallback(percentage, 0, total);
-      });
+            const int percentage = total > 0
+                ? static_cast<int>((downloaded * 100) / total)
+                : 0;
+
+            ThreadTask::RunOnMain([progressCallback, percentage, bytesPerSecond, total]() {
+                progressCallback(percentage, bytesPerSecond, total);
+            });
+        };
     }
 
-    for (size_t i = 0; i < contentLength; i += chunkSize) {
-       if (currentDownload.shouldCancel) {
-          file.close();
-          config.resumeFilePath = outputPath;
-          config.resumeOffset = currentDownload.downloadedBytes;
-          config.Save();
-          LOG_INFO("Download cancelled, progress saved for resume");
-          return false;
-       }
+    auto result = HttpClient::download_streaming(
+        std::string(url),
+        outputPath.string(),
+        headers,
+        startOffset,
+        extendedProgress,
+        control
+    );
 
-       while (currentDownload.isPaused) {
-          std::this_thread::sleep_for(std::chrono::milliseconds(100));
-       }
-
-       const size_t writeSize = std::min(chunkSize, contentLength - i);
-       file.write(resp.text.data() + i, static_cast<std::streamsize>(writeSize));
-       currentDownload.downloadedBytes += writeSize;
-
-       if (config.bandwidthLimit > 0) {
-          const auto now = std::chrono::steady_clock::now();
-          const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-            now - currentDownload.lastUpdateTime).count();
-
-          const auto expectedTime = static_cast<long long>((writeSize * 1000) / config.bandwidthLimit);
-          if (elapsed < expectedTime) {
-             std::this_thread::sleep_for(std::chrono::milliseconds(expectedTime - elapsed));
-          }
-          currentDownload.lastUpdateTime = std::chrono::steady_clock::now();
-       }
-
-       if (progressCallback) {
-          const int percentage = static_cast<int>(
-            (currentDownload.downloadedBytes * 100) / currentDownload.totalBytes);
-
-          const auto now = std::chrono::steady_clock::now();
-          const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-            now - currentDownload.startTime).count();
-
-          const size_t bytesPerSecond = elapsed > 0
-            ? (currentDownload.downloadedBytes - startOffset) / static_cast<size_t>(elapsed)
-            : 0;
-
-          ThreadTask::RunOnMain([progressCallback, percentage, bytesPerSecond, total = currentDownload.totalBytes]() {
-            progressCallback(percentage, bytesPerSecond, total);
-         });
-       }
+    if (result.wasCancelled) {
+        config.resumeFilePath = outputPath;
+        config.resumeOffset = result.bytesDownloaded;
+        config.Save();
+        LOG_INFO("Download cancelled, progress saved for resume at byte {}", result.bytesDownloaded);
+        return false;
     }
 
-    file.close();
-    currentDownload.isComplete = true;
-
-    if (progressCallback) {
-       const auto now = std::chrono::steady_clock::now();
-       const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-         now - currentDownload.startTime).count();
-
-       const size_t bytesPerSecond = elapsed > 0
-         ? (currentDownload.downloadedBytes - startOffset) / static_cast<size_t>(elapsed)
-         : 0;
-
-       ThreadTask::RunOnMain([progressCallback, bytesPerSecond, total = currentDownload.totalBytes]() {
-         progressCallback(100, bytesPerSecond, total);
-      });
+    if (!result.error.empty()) {
+        LOG_ERROR("Download failed: {}", result.error);
+        return false;
     }
+
+    if (result.status_code != 200 && result.status_code != 206) {
+        LOG_ERROR("Download failed: HTTP {}", result.status_code);
+        return false;
+    }
+
+    currentDownload.isComplete.store(true);
+    currentDownload.downloadedBytes.store(result.bytesDownloaded);
+    currentDownload.totalBytes.store(result.totalBytes);
 
     config.resumeFilePath.clear();
     config.resumeOffset = 0;
     config.Save();
 
-    LOG_INFO("Download complete: {}", outputPath.string());
+    if (progressCallback) {
+        const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::steady_clock::now() - currentDownload.startTime).count();
+        const size_t bytesPerSecond = elapsed > 0
+            ? (result.bytesDownloaded - startOffset) / static_cast<size_t>(elapsed)
+            : 0;
+
+        ThreadTask::RunOnMain([progressCallback, bytesPerSecond, total = result.totalBytes]() {
+            progressCallback(100, bytesPerSecond, total);
+        });
+    }
+
+    LOG_INFO("Download complete: {} ({} bytes)", outputPath.string(), result.bytesDownloaded);
     return true;
 }
 
 void AutoUpdater::InstallUpdate(const std::filesystem::path& updatePath) {
     const auto currentExe = GetCurrentExecutablePath();
-	auto backupPath = AltMan::Paths::BackupFile(std::format("altman_v{}_backup", APP_VERSION));
+    auto backupPath = AltMan::Paths::BackupFile(std::format("altman_v{}_backup", APP_VERSION));
 
 #ifdef _WIN32
     backupPath.replace_extension(".exe");
@@ -795,8 +762,7 @@ void AutoUpdater::RollbackToPreviousVersion() {
 }
 
 void AutoUpdater::CleanupOldBackups(int keepCount) {
-	const auto backupDir = AltMan::Paths::Backups();
-
+    const auto backupDir = AltMan::Paths::Backups();
 
     std::vector<std::filesystem::path> backups;
 
@@ -839,32 +805,32 @@ std::filesystem::path AutoUpdater::GetCurrentExecutablePath() {
 
 #ifdef __APPLE__
 std::string GetApplicationNameFromBundleId() {
-	CFBundleRef mainBundle = CFBundleGetMainBundle();
-	if (!mainBundle) return "";
+    CFBundleRef mainBundle = CFBundleGetMainBundle();
+    if (!mainBundle) return "";
 
-	auto nameRef = static_cast<CFStringRef>(
-		CFBundleGetValueForInfoDictionaryKey(mainBundle, kCFBundleNameKey));
-	if (!nameRef) return "";
+    auto nameRef = static_cast<CFStringRef>(
+        CFBundleGetValueForInfoDictionaryKey(mainBundle, kCFBundleNameKey));
+    if (!nameRef) return "";
 
-	std::array<char, 256> buffer{};
-	if (!CFStringGetCString(nameRef, buffer.data(), buffer.size(), kCFStringEncodingUTF8)) {
-		return "";
-	}
-	return std::string(buffer.data());
+    std::array<char, 256> buffer{};
+    if (!CFStringGetCString(nameRef, buffer.data(), buffer.size(), kCFStringEncodingUTF8)) {
+        return "";
+    }
+    return std::string(buffer.data());
 }
 
 std::string GetCurrentExecutableRealPath() {
-	std::array<char, PATH_MAX> buffer{};
-	uint32_t size = buffer.size();
+    std::array<char, PATH_MAX> buffer{};
+    uint32_t size = buffer.size();
 
-	if (_NSGetExecutablePath(buffer.data(), &size) != 0) {
-		return "";
-	}
+    if (_NSGetExecutablePath(buffer.data(), &size) != 0) {
+        return "";
+    }
 
-	std::array<char, PATH_MAX> resolved{};
-	if (!realpath(buffer.data(), resolved.data())) {
-		return "";
-	}
-	return std::string(resolved.data());
+    std::array<char, PATH_MAX> resolved{};
+    if (!realpath(buffer.data(), resolved.data())) {
+        return "";
+    }
+    return std::string(resolved.data());
 }
 #endif

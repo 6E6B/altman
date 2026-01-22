@@ -6,6 +6,7 @@
 #include <initializer_list>
 #include <functional>
 #include <span>
+#include <atomic>
 #include <cpr/cpr.h>
 #include <nlohmann/json.hpp>
 
@@ -26,6 +27,21 @@ struct BinaryResponse {
 };
 
 using ProgressCallback = std::function<void(size_t downloaded, size_t total)>;
+using ExtendedProgressCallback = std::function<void(size_t downloaded, size_t total, size_t bytesPerSecond)>;
+
+struct DownloadControl {
+    std::atomic<bool>* shouldCancel{nullptr};
+    std::atomic<bool>* isPaused{nullptr};
+    size_t bandwidthLimit{0};  // bytes per second, 0 = unlimited
+};
+
+struct StreamingDownloadResult {
+    int status_code{0};
+    size_t bytesDownloaded{0};
+    size_t totalBytes{0};
+    bool wasCancelled{false};
+    std::string error;
+};
 
 std::string build_kv_string(
     std::initializer_list<std::pair<const std::string, std::string>> items,
@@ -70,6 +86,15 @@ bool download(
     const std::string& output_path,
     std::initializer_list<std::pair<const std::string, std::string>> headers = {},
     ProgressCallback progress_cb = nullptr
+);
+
+StreamingDownloadResult download_streaming(
+    const std::string& url,
+    const std::string& output_path,
+    std::vector<std::pair<std::string, std::string>> headers = {},
+    size_t resumeOffset = 0,
+    ExtendedProgressCallback progress_cb = nullptr,
+    DownloadControl control = {}
 );
 
 class DownloadSession {

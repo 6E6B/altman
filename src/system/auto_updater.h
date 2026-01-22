@@ -42,13 +42,56 @@ struct UpdateInfo {
 struct DownloadState {
     std::string url;
     std::string outputPath;
-    size_t totalBytes{0};
-    size_t downloadedBytes{0};
+    std::atomic<size_t> totalBytes{0};
+    std::atomic<size_t> downloadedBytes{0};
     std::chrono::steady_clock::time_point startTime;
     std::chrono::steady_clock::time_point lastUpdateTime;
     std::atomic<bool> isPaused{false};
     std::atomic<bool> isComplete{false};
     std::atomic<bool> shouldCancel{false};
+
+    DownloadState() = default;
+    DownloadState(const DownloadState&) = delete;
+    DownloadState& operator=(const DownloadState&) = delete;
+
+    DownloadState(DownloadState&& other) noexcept
+        : url(std::move(other.url))
+        , outputPath(std::move(other.outputPath))
+        , totalBytes(other.totalBytes.load())
+        , downloadedBytes(other.downloadedBytes.load())
+        , startTime(other.startTime)
+        , lastUpdateTime(other.lastUpdateTime)
+        , isPaused(other.isPaused.load())
+        , isComplete(other.isComplete.load())
+        , shouldCancel(other.shouldCancel.load())
+    {}
+
+    DownloadState& operator=(DownloadState&& other) noexcept {
+        if (this != &other) {
+            url = std::move(other.url);
+            outputPath = std::move(other.outputPath);
+            totalBytes.store(other.totalBytes.load());
+            downloadedBytes.store(other.downloadedBytes.load());
+            startTime = other.startTime;
+            lastUpdateTime = other.lastUpdateTime;
+            isPaused.store(other.isPaused.load());
+            isComplete.store(other.isComplete.load());
+            shouldCancel.store(other.shouldCancel.load());
+        }
+        return *this;
+    }
+
+    void reset() {
+        url.clear();
+        outputPath.clear();
+        totalBytes.store(0);
+        downloadedBytes.store(0);
+        startTime = {};
+        lastUpdateTime = {};
+        isPaused.store(false);
+        isComplete.store(false);
+        shouldCancel.store(false);
+    }
 };
 
 class UpdaterConfig {
