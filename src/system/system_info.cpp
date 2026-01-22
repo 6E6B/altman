@@ -153,23 +153,6 @@ bool ExecuteCommand(const std::string& command, std::string& output) {
     return WEXITSTATUS(exitCode) == 0;
 }
 
-std::pair<int, std::string> ExecuteCommandWithCode(const std::string& cmd) {
-    std::array<char, 128> buffer;
-    std::string result;
-
-    FILE* pipe = popen((cmd + " 2>&1").c_str(), "r");
-    if (!pipe) {
-        return {-1, "popen failed"};
-    }
-
-    while (fgets(buffer.data(), buffer.size(), pipe) != nullptr) {
-        result += buffer.data();
-    }
-
-    int exitCode = pclose(pipe);
-    return {WEXITSTATUS(exitCode), result};
-}
-
 bool SpawnProcessWithEnv(
     const char* program,
     const std::vector<const char*>& args,

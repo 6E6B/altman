@@ -41,7 +41,6 @@ namespace SystemInfo {
 	};
 
 	bool ExecuteCommand(const std::string& command, std::string& output);
-	std::pair<int, std::string> ExecuteCommandWithCode(const std::string& cmd);
 
 	bool SpawnProcessWithEnv(
 		const char* program,

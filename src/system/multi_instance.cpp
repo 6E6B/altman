@@ -536,10 +536,9 @@ namespace MultiInstance {
             clientPath
         );
 
-        auto [result, output] = SystemInfo::ExecuteCommandWithCode(codesignCmd);
-
-        if (result != 0) {
-            LOG_ERROR("Codesign failed with code {}: {}", result, output);
+    	std::string output;
+        if (!SystemInfo::ExecuteCommand(codesignCmd, output)) {
+            LOG_ERROR("Codesign failed {}", output);
             return false;
         }
 
