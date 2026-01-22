@@ -41,7 +41,6 @@ void UpdaterConfig::Save() const {
         {"autoCheck", autoCheck},
         {"autoDownload", autoDownload},
         {"autoInstall", autoInstall},
-        {"showNotifications", showNotifications},
         {"bandwidthLimit", bandwidthLimit},
         {"lastCheck", std::chrono::system_clock::to_time_t(lastCheck)},
         {"lastInstalledVersion", lastInstalledVersion},
@@ -68,7 +67,6 @@ void UpdaterConfig::Load() {
     autoCheck = j.value("autoCheck", true);
     autoDownload = j.value("autoDownload", false);
     autoInstall = j.value("autoInstall", false);
-    showNotifications = j.value("showNotifications", true);
     bandwidthLimit = j.value("bandwidthLimit", 0);
 
     const auto lastCheckTime = j.value("lastCheck", 0LL);
@@ -366,11 +364,6 @@ void AutoUpdater::SetBandwidthLimit(size_t bytesPerSecond) {
     LOG_INFO("Bandwidth limit set to: {}", FormatSpeed(bytesPerSecond));
 }
 
-void AutoUpdater::SetShowNotifications(bool show) noexcept {
-    config.showNotifications = show;
-    config.Save();
-}
-
 void AutoUpdater::PauseDownload() noexcept {
     currentDownload.isPaused.store(true);
 }
@@ -417,12 +410,7 @@ void AutoUpdater::CheckForUpdates(bool silent) {
 
             if (!silent) {
                 const auto showError = []() {
-                    if (config.showNotifications) {
-                        UpdateNotification::Show("Update Check Failed",
-                            "Failed to check for updates. Please try again later.");
-                    } else {
-                        ModalPopup::AddInfo("Failed to check for updates. Please try again later.");
-                    }
+                	UpdateNotification::Show("Update Check Failed", "Failed to check for updates. Please try again later.");
                 };
                 ThreadTask::RunOnMain(showError);
             }
@@ -451,12 +439,7 @@ void AutoUpdater::CheckForUpdates(bool silent) {
         if (!foundUpdate) {
             if (!silent) {
                 const auto showUpToDate = []() {
-                    if (config.showNotifications) {
-                        UpdateNotification::Show("Up to Date",
-                            "You're using the latest version!");
-                    } else {
-                        ModalPopup::AddInfo("You're using the latest version!");
-                    }
+                	UpdateNotification::Show("Up to Date", "You're using the latest version!");
                 };
                 ThreadTask::RunOnMain(showUpToDate);
             }
@@ -486,7 +469,7 @@ void AutoUpdater::HandleUpdateAvailable(const UpdateInfo& info, bool silent) {
         msg = std::format("{}\n\n{}", msg, info.changelog);
     }
 
-    if (config.showNotifications && !info.isCritical) {
+    if (!info.isCritical) {
         UpdateNotification::Show("Update Available", msg, 10.0f, [info]() {
             ModalPopup::AddYesNo("Download and install update?", [info]() {
                 DownloadAndInstallUpdate(info);
@@ -515,11 +498,7 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo& info, bool autoInst
         bool success = false;
 
         const auto showDownloadStart = [useDelta]() {
-            if (config.showNotifications) {
-                UpdateNotification::Show("Download Started",
-                    useDelta ? "Downloading delta update..." : "Downloading update...",
-                    3.0f);
-            }
+        	UpdateNotification::Show("Download Started", useDelta ? "Downloading delta update..." : "Downloading update...", 3.0f);
         };
         ThreadTask::RunOnMain(showDownloadStart);
 
@@ -534,10 +513,7 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo& info, bool autoInst
 
             if (success) {
                 const auto showPatchApply = []() {
-                    if (config.showNotifications) {
-                        UpdateNotification::Show("Applying Patch",
-                            "Applying delta patch...", 3.0f);
-                    }
+                	UpdateNotification::Show("Applying Patch", "Applying delta patch...", 3.0f);
                 };
                 ThreadTask::RunOnMain(showPatchApply);
 
@@ -562,22 +538,14 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo& info, bool autoInst
 
         if (!success) {
             const auto showError = []() {
-                if (config.showNotifications) {
-                    UpdateNotification::Show("Download Failed",
-                        "Download failed. Please try again later.", 5.0f);
-                } else {
-                    ModalPopup::AddInfo("Download failed. Please try again later.");
-                }
+            	UpdateNotification::Show("Download Failed", "Download failed. Please try again later.", 5.0f);
             };
             ThreadTask::RunOnMain(showError);
             return;
         }
 
         const auto showComplete = []() {
-            if (config.showNotifications) {
-                UpdateNotification::Show("Download Complete",
-                    "Update downloaded successfully!", 3.0f);
-            }
+        	UpdateNotification::Show("Download Complete", "Update downloaded successfully!", 3.0f);
         };
         ThreadTask::RunOnMain(showComplete);
 
@@ -589,21 +557,12 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo& info, bool autoInst
                 InstallUpdate(tempPath);
             });
         } else {
-            if (config.showNotifications) {
-                ThreadTask::RunOnMain([tempPath]() {
-                    UpdateNotification::ShowPersistent("Update Ready",
-                        "Click to install and restart", [tempPath]() {
-                            InstallUpdate(tempPath);
-                        });
-                });
-            } else {
-                ThreadTask::RunOnMain([tempPath]() {
-                    ModalPopup::AddYesNo("Update ready! Restart now to install?",
-                        [tempPath]() {
-                            InstallUpdate(tempPath);
-                        });
-                });
-            }
+            ThreadTask::RunOnMain([tempPath]() {
+                ModalPopup::AddYesNo("Update ready! Restart now to install?",
+                    [tempPath]() {
+                        InstallUpdate(tempPath);
+                    });
+            });
         }
     });
 }
@@ -732,12 +691,7 @@ void AutoUpdater::RollbackToPreviousVersion() {
         LOG_INFO("No backup available for rollback");
 
         const auto showError = []() {
-            if (config.showNotifications) {
-                UpdateNotification::Show("Rollback Failed",
-                    "No backup found. Cannot rollback.", 5.0f);
-            } else {
-                ModalPopup::AddInfo("No backup found. Cannot rollback.");
-            }
+        	UpdateNotification::Show("Rollback Failed", "No backup found. Cannot rollback.", 5.0f);
         };
         ThreadTask::RunOnMain(showError);
         return;

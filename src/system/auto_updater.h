@@ -100,7 +100,6 @@ public:
     bool autoCheck{true};
     bool autoDownload{false};
     bool autoInstall{false};
-    bool showNotifications{true};
     size_t bandwidthLimit{0};
     std::chrono::system_clock::time_point lastCheck;
     std::string lastInstalledVersion;
@@ -122,7 +121,6 @@ public:
     [[nodiscard]] static UpdateChannel GetUpdateChannel() noexcept;
     static void SetAutoUpdate(bool autoCheck, bool autoDownload, bool autoInstall);
     static void SetBandwidthLimit(size_t bytesPerSecond);
-    static void SetShowNotifications(bool show) noexcept;
 
     static void PauseDownload() noexcept;
     static void ResumeDownload() noexcept;

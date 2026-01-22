@@ -416,7 +416,6 @@ void initializeAutoUpdater() {
      */
     AutoUpdater::Initialize();
     AutoUpdater::SetBandwidthLimit(5_MB);
-    AutoUpdater::SetShowNotifications(true);
     AutoUpdater::SetUpdateChannel(UpdateChannel::Stable);
     AutoUpdater::SetAutoUpdate(true, true, false);
     ClientUpdateChecker::UpdateChecker::Initialize();
