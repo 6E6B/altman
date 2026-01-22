@@ -4,8 +4,11 @@
 #include <chrono>
 #include <filesystem>
 #include <unordered_map>
+#include <unordered_set>
 #include <atomic>
 #include <thread>
+#include <mutex>
+#include <condition_variable>
 
 namespace ClientUpdateChecker {
 
@@ -29,14 +32,21 @@ namespace ClientUpdateChecker {
 
 			static void MarkClientAsInstalled(const std::string& clientName, const std::string& version);
 
-		private:
+			[[nodiscard]] static bool IsClientUpdating(const std::string& clientName);
+
 			static std::filesystem::path GetConfigPath();
+
+		private:
 			static void SaveVersionInfo();
+			static void SaveVersionInfoLocked();
 			static void LoadVersionInfo();
 
 			static void CheckClientForUpdate(const std::string& clientName);
 			static void NotifyAndUpdate(const std::string& clientName, const ClientVersionInfo& info);
 			static void CheckerLoop();
+
+			static bool TryBeginClientUpdate(const std::string& clientName);
+			static void EndClientUpdate(const std::string& clientName);
 	};
 
 }

@@ -16,24 +16,42 @@
 namespace ClientUpdateChecker {
 
 namespace {
+    std::mutex versionsMutex;
     std::unordered_map<std::string, ClientVersionInfo> clientVersions;
+    std::unordered_set<std::string> clientsCurrentlyUpdating;
+
     std::atomic<bool> isRunning{false};
     std::atomic<bool> shouldStop{false};
     std::thread checkerThread;
+    std::condition_variable shutdownCV;
+    std::mutex shutdownMutex;
+
+    std::once_flag configPathInitFlag;
     std::filesystem::path configPath;
+
+    void InitConfigPath() {
+        std::call_once(configPathInitFlag, []() {
+            configPath = UpdateChecker::GetConfigPath();
+        });
+    }
 }
 
 std::filesystem::path UpdateChecker::GetConfigPath() {
-	return AltMan::Paths::Config("client_versions.json");
+    return AltMan::Paths::Config("client_versions.json");
 }
 
-void UpdateChecker::SaveVersionInfo() {
-    if (configPath.empty()) {
-        configPath = GetConfigPath();
+void UpdateChecker::SaveVersionInfoLocked() {
+    InitConfigPath();
+
+    std::error_code ec;
+    std::filesystem::create_directories(configPath.parent_path(), ec);
+    if (ec) {
+        LOG_ERROR("Failed to create config directory: {}", ec.message());
+        return;
     }
 
     nlohmann::json j = nlohmann::json::object();
-    
+
     for (const auto& [clientName, info] : clientVersions) {
         j[clientName] = {
             {"installedVersion", info.installedVersion},
@@ -47,13 +65,18 @@ void UpdateChecker::SaveVersionInfo() {
     if (file.is_open()) {
         file << j.dump(2);
         file.close();
+    } else {
+        LOG_ERROR("Failed to open config file for writing: {}", configPath.string());
     }
 }
 
+void UpdateChecker::SaveVersionInfo() {
+    std::lock_guard lock(versionsMutex);
+    SaveVersionInfoLocked();
+}
+
 void UpdateChecker::LoadVersionInfo() {
-    if (configPath.empty()) {
-        configPath = GetConfigPath();
-    }
+    InitConfigPath();
 
     if (!std::filesystem::exists(configPath)) {
         return;
@@ -61,6 +84,7 @@ void UpdateChecker::LoadVersionInfo() {
 
     std::ifstream file(configPath);
     if (!file.is_open()) {
+        LOG_ERROR("Failed to open config file for reading: {}", configPath.string());
         return;
     }
 
@@ -69,15 +93,17 @@ void UpdateChecker::LoadVersionInfo() {
         file >> j;
         file.close();
 
+        std::lock_guard lock(versionsMutex);
+
         for (auto& [clientName, data] : j.items()) {
             ClientVersionInfo info;
             info.installedVersion = data.value("installedVersion", "");
             info.latestVersion = data.value("latestVersion", "");
             info.updateAvailable = data.value("updateAvailable", false);
-            
+
             auto lastCheckedTime = data.value("lastChecked", 0LL);
             info.lastChecked = std::chrono::system_clock::from_time_t(lastCheckedTime);
-            
+
             clientVersions[clientName] = info;
         }
     } catch (const std::exception& e) {
@@ -85,14 +111,37 @@ void UpdateChecker::LoadVersionInfo() {
     }
 }
 
+bool UpdateChecker::TryBeginClientUpdate(const std::string& clientName) {
+    std::lock_guard lock(versionsMutex);
+    if (clientsCurrentlyUpdating.contains(clientName)) {
+        return false;
+    }
+    clientsCurrentlyUpdating.insert(clientName);
+    return true;
+}
+
+void UpdateChecker::EndClientUpdate(const std::string& clientName) {
+    std::lock_guard lock(versionsMutex);
+    clientsCurrentlyUpdating.erase(clientName);
+}
+
+bool UpdateChecker::IsClientUpdating(const std::string& clientName) {
+    std::lock_guard lock(versionsMutex);
+    return clientsCurrentlyUpdating.contains(clientName);
+}
+
 void UpdateChecker::CheckClientForUpdate(const std::string& clientName) {
     if (!MultiInstance::isBaseClientInstalled(clientName)) {
         return;
     }
 
+    if (IsClientUpdating(clientName)) {
+        LOG_INFO("Skipping update check for {} - update already in progress", clientName);
+        return;
+    }
+
     LOG_INFO("Checking for updates: {}", clientName);
 
-    auto& info = clientVersions[clientName];
     std::string latestVersion = GetClientVersion(clientName);
 
     if (latestVersion.empty()) {
@@ -100,40 +149,57 @@ void UpdateChecker::CheckClientForUpdate(const std::string& clientName) {
         return;
     }
 
-    info.latestVersion = latestVersion;
-    info.lastChecked = std::chrono::system_clock::now();
+    ClientVersionInfo infoCopy;
+    bool shouldUpdate = false;
 
-    if (info.installedVersion.empty()) {
-        info.installedVersion = latestVersion;
-        info.updateAvailable = false;
-        LOG_INFO("{} version initialized: {}", clientName, latestVersion);
-        SaveVersionInfo();
-        return;
+    {
+        std::lock_guard lock(versionsMutex);
+
+        auto& info = clientVersions[clientName];
+        info.latestVersion = latestVersion;
+        info.lastChecked = std::chrono::system_clock::now();
+
+        if (info.installedVersion.empty()) {
+            info.installedVersion = latestVersion;
+            info.updateAvailable = false;
+            LOG_INFO("{} version initialized: {}", clientName, latestVersion);
+            SaveVersionInfoLocked();
+            return;
+        }
+
+        if (info.installedVersion != latestVersion) {
+            info.updateAvailable = true;
+            LOG_INFO("{} update available: {} -> {}", clientName, info.installedVersion, latestVersion);
+            SaveVersionInfoLocked();
+            infoCopy = info;
+            shouldUpdate = true;
+        } else {
+            info.updateAvailable = false;
+            LOG_INFO("{} is up to date: {}", clientName, latestVersion);
+            SaveVersionInfoLocked();
+        }
     }
 
-    if (info.installedVersion != latestVersion) {
-        info.updateAvailable = true;
-        LOG_INFO("{} update available: {} -> {}",
-            clientName, info.installedVersion, latestVersion);
-        
-        SaveVersionInfo();
-
-        ThreadTask::RunOnMain([clientName, info]() {
-            NotifyAndUpdate(clientName, info);
+    if (shouldUpdate) {
+        ThreadTask::RunOnMain([clientName, infoCopy]() {
+            NotifyAndUpdate(clientName, infoCopy);
         });
-    } else {
-        info.updateAvailable = false;
-        LOG_INFO("{} is up to date: {}", clientName, latestVersion);
-        SaveVersionInfo();
     }
 }
 
 void UpdateChecker::NotifyAndUpdate(const std::string& clientName, const ClientVersionInfo& info) {
-    std::string message = std::format("Updating {} from {} to {}...", 
+    if (!TryBeginClientUpdate(clientName)) {
+        LOG_WARN("Cannot update {} - update already in progress", clientName);
+        UpdateNotification::Show("Update Skipped",
+            std::format("{} is already being updated", clientName), 3.0f);
+        return;
+    }
+
+    std::string message = std::format("Updating {} from {} to {}...",
         clientName, info.installedVersion, info.latestVersion);
 
     UpdateNotification::Show("Client Update", message, 5.0f);
-    
+
     LOG_INFO("Starting auto-update for {}", clientName);
 
     std::string clientPath = MultiInstance::getBaseClientPath(clientName);
@@ -142,37 +208,45 @@ void UpdateChecker::NotifyAndUpdate(const std::string& clientName, const ClientV
         std::filesystem::remove_all(clientPath, ec);
         if (ec) {
             LOG_ERROR("Failed to remove old {}: {}", clientName, ec.message());
-            UpdateNotification::Show("Update Failed", 
+            UpdateNotification::Show("Update Failed",
                 std::format("Failed to remove old {} client", clientName), 5.0f);
+            EndClientUpdate(clientName);
             return;
         }
     }
 
-    auto progressCallback = [clientName](float progress, const std::string& msg) {
-        //LOG_INFO("{} update progress: {:.0f}% - {}", clientName, progress * 100.0f, msg);
+    std::string clientNameCopy = clientName;
+
+    auto progressCallback = [clientNameCopy](float progress, const std::string& msg) {
+        // LOG_INFO("{} update progress: {:.0f}% - {}", clientNameCopy, progress * 100.0f, msg);
     };
 
-    auto completionCallback = [clientName](bool success, const std::string& message) {
+    auto completionCallback = [clientNameCopy](bool success, const std::string& message) {
         if (success) {
-            LOG_INFO("{} updated successfully", clientName);
+            LOG_INFO("{} updated successfully", clientNameCopy);
 
-            auto& info = clientVersions[clientName];
-            info.installedVersion = info.latestVersion;
-            info.updateAvailable = false;
-            SaveVersionInfo();
-            
-            ThreadTask::RunOnMain([clientName]() {
-                UpdateNotification::Show("Update Complete", 
-                    std::format("{} has been updated successfully!", clientName), 5.0f);
+            {
+                std::lock_guard lock(versionsMutex);
+                auto& info = clientVersions[clientNameCopy];
+                info.installedVersion = info.latestVersion;
+                info.updateAvailable = false;
+                SaveVersionInfoLocked();
+            }
+
+            ThreadTask::RunOnMain([clientNameCopy]() {
+                UpdateNotification::Show("Update Complete",
+                    std::format("{} has been updated successfully!", clientNameCopy), 5.0f);
             });
         } else {
-            LOG_ERROR("{} update failed: {}", clientName, message);
-            
-            ThreadTask::RunOnMain([clientName, message]() {
-                UpdateNotification::Show("Update Failed", 
-                    std::format("{}: {}", clientName, message), 5.0f);
+            LOG_ERROR("{} update failed: {}", clientNameCopy, message);
+
+            ThreadTask::RunOnMain([clientNameCopy, message]() {
+                UpdateNotification::Show("Update Failed",
+                    std::format("{}: {}", clientNameCopy, message), 5.0f);
             });
         }
+
+        EndClientUpdate(clientNameCopy);
     };
 
     ClientManager::InstallClientAsync(clientName, progressCallback, completionCallback);
@@ -181,30 +255,47 @@ void UpdateChecker::NotifyAndUpdate(const std::string& clientName, const ClientV
 void UpdateChecker::CheckerLoop() {
     LOG_INFO("Client update checker started");
 
-    while (!shouldStop) {
-        
+    while (!shouldStop.load()) {
+
         for (const auto& clientName : g_availableClientsNames) {
-            if (shouldStop) break;
+            if (shouldStop.load()) break;
 
             if (clientName != "Default" && !MultiInstance::isBaseClientInstalled(clientName)) {
                 continue;
             }
 
-            auto& info = clientVersions[clientName];
-            auto now = std::chrono::system_clock::now();
-            auto elapsed = std::chrono::duration_cast<std::chrono::hours>(
-                now - info.lastChecked).count();
+            bool shouldCheck = false;
+            {
+                std::lock_guard lock(versionsMutex);
+                auto it = clientVersions.find(clientName);
+                if (it == clientVersions.end()) {
+                    shouldCheck = true;
+                } else {
+                    auto now = std::chrono::system_clock::now();
+                    auto elapsed = std::chrono::duration_cast<std::chrono::hours>(
+                        now - it->second.lastChecked).count();
+                    shouldCheck = (elapsed >= 24 ||
+                        it->second.lastChecked == std::chrono::system_clock::time_point{});
+                }
+            }
 
-            if (elapsed >= 24 || info.lastChecked == std::chrono::system_clock::time_point{}) {
+            if (shouldCheck) {
                 CheckClientForUpdate(clientName);
             }
 
-            std::this_thread::sleep_for(std::chrono::seconds(2));
+            {
+                std::unique_lock lock(shutdownMutex);
+                if (shutdownCV.wait_for(lock, std::chrono::seconds(2),
+                    []() { return shouldStop.load(); })) {
+                    break;
+                }
+            }
         }
 
-        // Sleep for 1 hour before next check cycle
-        for (int i = 0; i < 3600 && !shouldStop; ++i) {
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+        {
+            std::unique_lock lock(shutdownMutex);
+            shutdownCV.wait_for(lock, std::chrono::hours(1),
+                []() { return shouldStop.load(); });
         }
     }
 
@@ -212,54 +303,70 @@ void UpdateChecker::CheckerLoop() {
 }
 
 void UpdateChecker::Initialize() {
-    if (isRunning) {
+    if (isRunning.load()) {
         LOG_WARN("Client update checker already running");
         return;
     }
 
     LoadVersionInfo();
 
-	if (!MultiInstance::isBaseClientInstalled("Default")) {
-		LOG_INFO("Default client not installed, downloading automatically...");
+    if (!MultiInstance::isBaseClientInstalled("Default")) {
+        LOG_INFO("Default client not installed, downloading automatically...");
 
-		auto progressCallback = [](float progress, const std::string& msg) {
-			// LOG_INFO("Default download progress: {:.0f}% - {}", progress * 100.0f, msg);
-		};
+        if (!TryBeginClientUpdate("Default")) {
+            LOG_WARN("Default client installation already in progress");
+        } else {
+            auto progressCallback = [](float progress, const std::string& msg) {
+                // LOG_INFO("Default download progress: {:.0f}% - {}", progress * 100.0f, msg);
+            };
 
-		auto completionCallback = [](bool success, const std::string& message) {
-			if (success) {
-				LOG_INFO("Default client installed successfully");
-				MarkClientAsInstalled("Default", GetClientVersion("Default"));
-			} else {
-				LOG_ERROR("Default client installation failed: {}", message);
-				ThreadTask::RunOnMain([message]() {
-					UpdateNotification::Show("Installation Failed",
-						std::format("Failed to install Default client: {}", message), 5.0f);
-				});
-			}
-		};
+            auto completionCallback = [](bool success, const std::string& message) {
+                if (success) {
+                    LOG_INFO("Default client installed successfully");
+                    MarkClientAsInstalled("Default", GetClientVersion("Default"));
+                } else {
+                    LOG_ERROR("Default client installation failed: {}", message);
+                    ThreadTask::RunOnMain([message]() {
+                        UpdateNotification::Show("Installation Failed",
+                            std::format("Failed to install Default client: {}", message), 5.0f);
+                    });
+                }
+                EndClientUpdate("Default");
+            };
 
-		ClientManager::InstallClientAsync("Default", progressCallback, completionCallback);
-	}
-    
-    shouldStop = false;
-    isRunning = true;
-    
+            ClientManager::InstallClientAsync("Default", progressCallback, completionCallback);
+        }
+    }
+
+    shouldStop.store(false);
+    isRunning.store(true);
+
     checkerThread = std::thread(CheckerLoop);
-    checkerThread.detach();
-    
+
     LOG_INFO("Client update checker initialized");
 }
 
 void UpdateChecker::Shutdown() {
-    if (!isRunning) {
+    if (!isRunning.load()) {
         return;
     }
 
-    shouldStop = true;
-    isRunning = false;
-    
-   LOG_INFO("Client update checker shutdown requested");
+    LOG_INFO("Client update checker shutdown requested");
+
+    shouldStop.store(true);
+
+    {
+        std::lock_guard lock(shutdownMutex);
+        shutdownCV.notify_all();
+    }
+
+    if (checkerThread.joinable()) {
+        checkerThread.join();
+    }
+
+    isRunning.store(false);
+
+    LOG_INFO("Client update checker shutdown complete");
 }
 
 void UpdateChecker::CheckNow(const std::string& clientName) {
@@ -271,11 +378,21 @@ void UpdateChecker::CheckNow(const std::string& clientName) {
 void UpdateChecker::CheckAllNow() {
     ThreadTask::fireAndForget([]() {
         for (const auto& clientName : g_availableClientsNames) {
+            if (shouldStop.load()) break;
+
             if (clientName != "Default" && !MultiInstance::isBaseClientInstalled(clientName)) {
                 continue;
             }
+
             CheckClientForUpdate(clientName);
-            std::this_thread::sleep_for(std::chrono::seconds(2));
+
+            {
+                std::unique_lock lock(shutdownMutex);
+                if (shutdownCV.wait_for(lock, std::chrono::seconds(2),
+                    []() { return shouldStop.load(); })) {
+                    break;
+                }
+            }
         }
     });
 }
@@ -300,6 +417,7 @@ std::string UpdateChecker::GetClientVersion(const std::string& clientName) {
 }
 
 ClientVersionInfo UpdateChecker::GetVersionInfo(const std::string& clientName) {
+    std::lock_guard lock(versionsMutex);
     auto it = clientVersions.find(clientName);
     if (it != clientVersions.end()) {
         return it->second;
@@ -308,12 +426,13 @@ ClientVersionInfo UpdateChecker::GetVersionInfo(const std::string& clientName) {
 }
 
 void UpdateChecker::MarkClientAsInstalled(const std::string& clientName, const std::string& version) {
+    std::lock_guard lock(versionsMutex);
     auto& info = clientVersions[clientName];
     info.installedVersion = version;
     info.latestVersion = version;
     info.updateAvailable = false;
     info.lastChecked = std::chrono::system_clock::now();
-    SaveVersionInfo();
+    SaveVersionInfoLocked();
 }
 
 }
