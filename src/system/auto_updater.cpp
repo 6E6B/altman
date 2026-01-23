@@ -16,6 +16,7 @@
 #include "ui/widgets/modal_popup.h"
 #include "ui/widgets/notifications.h"
 #include "system/system_info.h"
+#include "ui/widgets/progress_overlay.h"
 
 #ifdef _WIN32
     #include <windows.h>
@@ -84,6 +85,7 @@ namespace {
     UpdaterConfig config;
     std::filesystem::path pendingUpdatePath;
     DownloadState currentDownload;
+	constexpr std::string_view UPDATE_TASK_ID = "auto_update_download";
 }
 
 constexpr std::string_view AutoUpdater::GetChannelName(UpdateChannel channel) noexcept {
@@ -219,17 +221,25 @@ void AutoUpdater::CreateUpdateScript(const std::string& newPath, const std::stri
     );
 #else
     std::format_to(std::ostreambuf_iterator<char>(script),
-        "#!/bin/bash\n"
-        "set -e\n"
-        "\n"
-        "echo 'Waiting for application to close...'\n"
-        "sleep 2\n"
-        "\n"
-        "NEW_PATH=\"{}\"\n"
-        "CURRENT_PATH=\"{}\"\n"
-        "BACKUP_PATH=\"{}\"\n"
-        "\n"
-        "echo 'Creating backup...'\n"
+    "#!/bin/bash\n"
+		"set -e\n"
+		"\n"
+		"LOG_FILE=\"/tmp/altman_update.log\"\n"
+		"exec > \"$LOG_FILE\" 2>&1\n"
+		"\n"
+		"echo \"Update script started at $(date)\"\n"
+		"echo 'Waiting for application to close...'\n"
+		"sleep 2\n"
+		"\n"
+		"NEW_PATH=\"{}\"\n"
+		"CURRENT_PATH=\"{}\"\n"
+		"BACKUP_PATH=\"{}\"\n"
+		"\n"
+		"echo \"NEW_PATH: $NEW_PATH\"\n"
+		"echo \"CURRENT_PATH: $CURRENT_PATH\"\n"
+		"echo \"BACKUP_PATH: $BACKUP_PATH\"\n"
+		"\n"
+		"echo 'Creating backup...'\n"
         "if [[ -d \"$CURRENT_PATH\" ]]; then\n"
         "    cp -R \"$CURRENT_PATH\" \"$BACKUP_PATH\"\n"
         "else\n"
@@ -307,17 +317,17 @@ void AutoUpdater::LaunchUpdateScript() {
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
 #else
-    pid_t pid;
-    std::string path = scriptPath.string();
-    char* argv[] = {
-        const_cast<char*>("/bin/bash"),
-        const_cast<char*>(path.c_str()),
-        nullptr
-    };
+	pid_t pid;
+	std::string path = scriptPath.string();
+	char* argv[] = {
+		const_cast<char*>("/bin/bash"),
+		const_cast<char*>(path.c_str()),
+		nullptr
+	};
 
-    if (posix_spawn(&pid, "/bin/bash", nullptr, nullptr, argv, environ) != 0) {
-        LOG_ERROR("Failed to launch update script");
-    }
+	if (posix_spawn(&pid, "/bin/bash", nullptr, nullptr, argv, environ) != 0) {
+		LOG_ERROR("Failed to launch update script");
+	}
 #endif
 }
 
@@ -786,14 +796,26 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo& info, bool autoInst
         const auto outputExePath = tempDir / "AltMan.exe";
 #endif
 
-        ThreadTask::RunOnMain([useDelta]() {
-            UpdateNotification::Show("Download Started",
-                useDelta ? "Downloading delta update..." : "Downloading update...", 3.0f);
-        });
+    	ThreadTask::RunOnMain([&info, useDelta]() {
+			ProgressOverlay::Add(
+				std::string(UPDATE_TASK_ID),
+				useDelta ? "Downloading delta update" : "Downloading update",
+				true,
+				[]() { CancelDownload(); }
+			);
+			ProgressOverlay::Update(std::string(UPDATE_TASK_ID), 0.0f,
+				std::format("0 / {}", FormatBytes(useDelta ? info.totalDeltaSize() : info.fullSize)));
+		});
 
-        const auto progressCallback = [](int percentage, size_t speed, size_t total) {
-            // Progress is tracked via DownloadState
-        };
+    	const auto progressCallback = [](int percentage, size_t speed, size_t total) {
+			ThreadTask::RunOnMain([percentage, speed, total]() {
+				const float progress = static_cast<float>(percentage) / 100.0f;
+				const auto detail = std::format("{} • {}",
+					FormatBytes(static_cast<size_t>(progress * total)),
+					FormatSpeed(speed));
+				ProgressOverlay::Update(std::string(UPDATE_TASK_ID), progress, detail);
+			});
+		};
 
         if (useDelta) {
 #ifdef __APPLE__
@@ -861,9 +883,7 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo& info, bool autoInst
             success = DownloadFileWithResume(info.downloadUrl, zipPath, progressCallback);
 
             if (success) {
-                ThreadTask::RunOnMain([]() {
-                    UpdateNotification::Show("Extracting", "Extracting update...", 3.0f);
-                });
+            	LOG_INFO("Extracting update...");
 
                 const auto extractPath = tempDir / "extracted";
                 success = ExtractZipToPath(zipPath, extractPath);
@@ -888,20 +908,18 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo& info, bool autoInst
 #endif
         }
 
-        if (!success) {
-            ThreadTask::RunOnMain([]() {
-                UpdateNotification::Show("Download Failed",
-                    "Download failed. Please try again later.", 5.0f);
-            });
+    	if (!success) {
+			ThreadTask::RunOnMain([]() {
+				ProgressOverlay::Complete(std::string(UPDATE_TASK_ID), false, "Download failed");
+			});
+			std::filesystem::remove_all(tempDir);
+			return;
+		}
 
-            std::filesystem::remove_all(tempDir);
-            return;
-        }
+    	ThreadTask::RunOnMain([]() {
+			ProgressOverlay::Complete(std::string(UPDATE_TASK_ID), true, "Ready to install");
+		});
 
-        ThreadTask::RunOnMain([]() {
-            UpdateNotification::Show("Download Complete",
-                "Update downloaded successfully!", 3.0f);
-        });
 
 #ifdef __APPLE__
         pendingUpdatePath = outputAppPath;
@@ -1032,10 +1050,10 @@ void AutoUpdater::InstallUpdate(const std::filesystem::path& updatePath) {
 
 #ifdef __APPLE__
     const auto currentPath = GetAppBundlePath();
-    auto backupPath = AltMan::Paths::BackupFile(std::format("AltMan_v{}_backup.app", APP_VERSION));
+    auto backupPath = AltMan::Paths::Backups() / std::format("AltMan_v{}_backup.app", APP_VERSION);
 #else
     const auto currentPath = GetCurrentExecutablePath();
-    auto backupPath = AltMan::Paths::BackupFile(std::format("AltMan_v{}_backup.exe", APP_VERSION));
+    auto backupPath = AltMan::Paths::Backups() / std::format("AltMan_v{}_backup.exe", APP_VERSION);
 #endif
 
     config.backupPath = backupPath;
@@ -1062,11 +1080,13 @@ void AutoUpdater::RollbackToPreviousVersion() {
 #ifdef __APPLE__
         const auto currentPath = GetAppBundlePath();
         const auto tempBackup = std::filesystem::temp_directory_path() / "altman_rollback_tmp.app";
-        std::filesystem::copy(currentPath, tempBackup, std::filesystem::copy_options::recursive);
+    	if (std::filesystem::exists(tempBackup)) {
+			std::filesystem::remove_all(tempBackup);
+		}
+    	std::println("rolling back from {} to {}", currentPath.string(), tempBackup.string());
 #else
         const auto currentPath = GetCurrentExecutablePath();
         auto tempBackup = std::filesystem::path(currentPath).concat(".rollback_tmp");
-        std::filesystem::copy_file(currentPath, tempBackup, std::filesystem::copy_options::overwrite_existing);
 #endif
 
         CreateUpdateScript(config.backupPath.string(), currentPath.string(), tempBackup.string());

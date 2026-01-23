@@ -64,8 +64,4 @@ namespace AltMan {
 		return EnsureDir(Storage()) / filename;
 	}
 
-	std::filesystem::path Paths::BackupFile(std::string_view filename) {
-		return EnsureDir(Backups()) / filename;
-	}
-
 }

@@ -461,7 +461,7 @@ bool RenderMainMenu() {
         if (ImGui::Button("Import")) {
 
         	if (!s_backupFiles.empty()) {
-        		const auto dir = AltMan::Paths::BackupFile(s_backupFiles[s_selectedBackup]);
+        		const auto dir = AltMan::Paths::Backups() / s_backupFiles[s_selectedBackup];
 
         		auto result = Backup::Import(dir.string(), s_importPassword);
 
