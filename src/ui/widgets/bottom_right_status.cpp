@@ -2,6 +2,7 @@
 
 #include <mutex>
 #include <cmath>
+#include <format>
 
 namespace BottomRightStatus {
     namespace {
@@ -16,6 +17,8 @@ namespace BottomRightStatus {
         constexpr float DOT_ANIMATION_SPEED = 2.5f;
         constexpr float SPINNER_SPEED = 4.0f;
         constexpr float DEFAULT_DURATION = 8.0f;
+
+        constexpr std::size_t MAX_VISIBLE_ACCOUNTS = 2;
 
         struct State {
             std::string currentText;
@@ -106,6 +109,31 @@ namespace BottomRightStatus {
                 vtx.y = center.y + dx * sinA + dy * cosA;
             }
         }
+
+        std::string BuildSelectedAccountsString(const std::vector<SelectedAccount>& selectedAccounts) {
+            if (selectedAccounts.empty()) {
+                return "Ready";
+            }
+
+            std::string result = "Selected: ";
+            const std::size_t visibleCount = std::min(selectedAccounts.size(), MAX_VISIBLE_ACCOUNTS);
+
+            for (std::size_t i = 0; i < visibleCount; ++i) {
+                if (i > 0) {
+                    result += ", ";
+                }
+                result += selectedAccounts[i].label;
+                if (i == 0 && selectedAccounts.size() > 1) {
+                    result += "*";
+                }
+            }
+
+            if (selectedAccounts.size() > MAX_VISIBLE_ACCOUNTS) {
+                result += std::format(" +{} more", selectedAccounts.size() - MAX_VISIBLE_ACCOUNTS);
+            }
+
+            return result;
+        }
     }
 
     void AddText(const std::string& text, Type type, float duration) {
@@ -138,12 +166,12 @@ namespace BottomRightStatus {
         AddText(text, Type::Idle, duration);
     }
 
-	void Warning(const std::string& text, float duration) {
-    	AddText(text, Type::Warning, duration);
+    void Warning(const std::string& text, float duration) {
+        AddText(text, Type::Warning, duration);
     }
 
-	void Error(const std::string& text, float duration) {
-    	AddText(text, Type::Error, duration);
+    void Error(const std::string& text, float duration) {
+        AddText(text, Type::Error, duration);
     }
 
     void Clear() {
@@ -293,7 +321,9 @@ namespace BottomRightStatus {
                 ImGui::TextUnformatted("Selected: ");
                 ImGui::SameLine(0, 0);
 
-                for (std::size_t i = 0; i < selectedAccounts.size(); ++i) {
+                const std::size_t visibleCount = std::min(selectedAccounts.size(), MAX_VISIBLE_ACCOUNTS);
+
+                for (std::size_t i = 0; i < visibleCount; ++i) {
                     if (i > 0) {
                         ImGui::TextUnformatted(", ");
                         ImGui::SameLine(0, 0);
@@ -308,9 +338,12 @@ namespace BottomRightStatus {
                         ImGui::TextUnformatted("*");
                     }
 
-                    if (i + 1 < selectedAccounts.size()) {
-                        ImGui::SameLine(0, 0);
-                    }
+                    ImGui::SameLine(0, 0);
+                }
+
+                if (selectedAccounts.size() > MAX_VISIBLE_ACCOUNTS) {
+                    ImGui::TextUnformatted(std::format(" +{} more",
+                        selectedAccounts.size() - MAX_VISIBLE_ACCOUNTS).c_str());
                 }
             }
             else if (isIdle && !g_state.isTransitioning) {
@@ -324,9 +357,6 @@ namespace BottomRightStatus {
                 const ImVec2 textStartPos = ImGui::GetCursorScreenPos();
 
                 std::string currentDisplay = g_state.currentText;
-            	/*if (g_state.currentType == Type::Loading) {
-            		currentDisplay += GetAnimatedDots(time);
-            	}*/
 
                 if (g_state.duration > 0.0f) {
                     const int remaining = static_cast<int>(std::ceil(g_state.duration - g_state.elapsed));
@@ -336,34 +366,13 @@ namespace BottomRightStatus {
                 }
 
                 if (isIdle) {
-                    if (hasSelectedAccounts) {
-                        currentDisplay = "Selected: ";
-                        for (std::size_t i = 0; i < selectedAccounts.size(); ++i) {
-                            if (i > 0) currentDisplay += ", ";
-                            currentDisplay += selectedAccounts[i].label;
-                            if (i == 0 && selectedAccounts.size() > 1) currentDisplay += "*";
-                        }
-                    } else {
-                        currentDisplay = "Ready";
-                    }
+                    currentDisplay = BuildSelectedAccountsString(selectedAccounts);
                 }
 
                 std::string previousDisplay = g_state.previousText;
-            	/*if (g_state.previousType == Type::Loading && g_state.isTransitioning) {
-            		previousDisplay += GetAnimatedDots(time);
-            	}*/
 
                 if (wasIdle) {
-                    if (hasSelectedAccounts) {
-                        previousDisplay = "Selected: ";
-                        for (std::size_t i = 0; i < selectedAccounts.size(); ++i) {
-                            if (i > 0) previousDisplay += ", ";
-                            previousDisplay += selectedAccounts[i].label;
-                            if (i == 0 && selectedAccounts.size() > 1) previousDisplay += "*";
-                        }
-                    } else {
-                        previousDisplay = "Ready";
-                    }
+                    previousDisplay = BuildSelectedAccountsString(selectedAccounts);
                 }
 
                 const float textWidth = std::max(
