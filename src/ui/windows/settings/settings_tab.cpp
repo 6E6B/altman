@@ -758,6 +758,15 @@ void RenderSettingsTab() {
 #endif
 	}
 
+	ImGui::SameLine();
+	if (ImGui::Button("Rollback to previous version")) {
+		AutoUpdater::RollbackToPreviousVersion();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Cleanup old backups")) {
+		AutoUpdater::CleanupOldBackups();
+	}
+
 	ImGui::Spacing();
 	ImGui::SeparatorText("Launch Options");
 
@@ -829,6 +838,13 @@ void RenderSettingsTab() {
 	}
 
 	ImGui::EndDisabled();
+
+	if (ImGui::Checkbox("Low FPS", &clearOnLaunch)) {
+		// roblox-player.exe --fps=60
+	}
+	if (ImGui::Checkbox("No Sound", &clearOnLaunch)) {
+		// roblox-player.exe --no-sound"
+	}
 
 	ImGui::Spacing();
 
