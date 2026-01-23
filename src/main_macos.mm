@@ -10,43 +10,42 @@
 #include "imgui_impl_osx.h"
 #include "utils/stb_image.h"
 
-#include "ui/ui.h"
+#include "assets/fonts/embedded_fa_solid.h"
+#include "assets/fonts/embedded_rubik.h"
 #include "components/data.h"
-#include "network/roblox/common.h"
+#include "console/console.h"
+#include "image.h"
 #include "network/roblox/auth.h"
+#include "network/roblox/common.h"
 #include "network/roblox/games.h"
 #include "network/roblox/session.h"
 #include "network/roblox/social.h"
-#include "ui/widgets/notifications.h"
-#include "ui/widgets/modal_popup.h"
-#include "utils/thread_task.h"
-#include "utils/crypto.h"
 #include "system/auto_updater.h"
 #include "system/client_update_checker_macos.h"
-#include "console/console.h"
-#include "image.h"
+#include "ui/ui.h"
+#include "ui/widgets/modal_popup.h"
+#include "ui/widgets/notifications.h"
+#include "utils/crypto.h"
+#include "utils/thread_task.h"
 
-#include "assets/fonts/embedded_rubik.h"
-#include "assets/fonts/embedded_fa_solid.h"
-
-#include <cstdio>
-#include <thread>
-#include <chrono>
 #include <algorithm>
-#include <string>
-#include <format>
-#include <print>
+#include <chrono>
+#include <cstdio>
 #include <expected>
-#include <ranges>
-#include <mutex>
-#include <shared_mutex>
+#include <format>
 #include <memory>
+#include <mutex>
+#include <print>
+#include <ranges>
+#include <shared_mutex>
+#include <string>
+#include <thread>
 
 namespace {
     id<MTLDevice> g_metalDevice = nil;
     id<MTLCommandQueue> g_commandQueue = nil;
-    ImFont* g_rubikFont = nullptr;
-    ImFont* g_iconFont = nullptr;
+    ImFont *g_rubikFont = nullptr;
+    ImFont *g_iconFont = nullptr;
 
     constexpr ImWchar ICON_MIN_FA = 0xf000;
     constexpr ImWchar ICON_MAX_16_FA = 0xf3ff;
@@ -54,21 +53,21 @@ namespace {
 
     std::atomic<bool> g_fontReloadPending = false;
     std::atomic<bool> g_running = true;
-}
+} // namespace
 
 void ReloadFonts(float dpiScale) {
     IM_ASSERT([NSThread isMainThread]);
 
-    ImGuiIO& io = ImGui::GetIO();
+    ImGuiIO &io = ImGui::GetIO();
 
     io.Fonts->Clear();
 
     const float scaledFontSize = BASE_FONT_SIZE * dpiScale;
 
-    ImFontConfig rubikCfg{};
+    ImFontConfig rubikCfg {};
     rubikCfg.FontDataOwnedByAtlas = false;
     g_rubikFont = io.Fonts->AddFontFromMemoryTTF(
-        const_cast<void*>(static_cast<const void*>(EmbeddedFonts::rubik_regular_ttf)),
+        const_cast<void *>(static_cast<const void *>(EmbeddedFonts::rubik_regular_ttf)),
         sizeof(EmbeddedFonts::rubik_regular_ttf),
         scaledFontSize,
         &rubikCfg
@@ -79,7 +78,7 @@ void ReloadFonts(float dpiScale) {
         g_rubikFont = io.Fonts->AddFontDefault();
     }
 
-    ImFontConfig iconCfg{};
+    ImFontConfig iconCfg {};
     iconCfg.MergeMode = true;
     iconCfg.PixelSnapH = true;
     iconCfg.FontDataOwnedByAtlas = false;
@@ -87,7 +86,7 @@ void ReloadFonts(float dpiScale) {
 
     static constexpr ImWchar fa_solid_ranges[] = {ICON_MIN_FA, ICON_MAX_16_FA, 0};
     g_iconFont = io.Fonts->AddFontFromMemoryTTF(
-        const_cast<void*>(static_cast<const void*>(EmbeddedFonts::fa_solid_ttf)),
+        const_cast<void *>(static_cast<const void *>(EmbeddedFonts::fa_solid_ttf)),
         sizeof(EmbeddedFonts::fa_solid_ttf),
         scaledFontSize,
         &iconCfg,
@@ -107,11 +106,11 @@ void ReloadFonts(float dpiScale) {
 }
 
 [[nodiscard]]
-std::expected<TextureLoadResult, std::string> LoadTextureFromMemory(const void* data, size_t data_size) {
+std::expected<TextureLoadResult, std::string> LoadTextureFromMemory(const void *data, size_t data_size) {
     int image_width = 0;
     int image_height = 0;
-    unsigned char* image_data = stbi_load_from_memory(
-        static_cast<const unsigned char*>(data),
+    unsigned char *image_data = stbi_load_from_memory(
+        static_cast<const unsigned char *>(data),
         static_cast<int>(data_size),
         &image_width,
         &image_height,
@@ -123,15 +122,13 @@ std::expected<TextureLoadResult, std::string> LoadTextureFromMemory(const void* 
         return std::unexpected("Failed to decode image data");
     }
 
-    auto imageDataCleanup = std::unique_ptr<unsigned char, decltype(&stbi_image_free)>(
-        image_data, stbi_image_free
-    );
+    auto imageDataCleanup = std::unique_ptr<unsigned char, decltype(&stbi_image_free)>(image_data, stbi_image_free);
 
-    MTLTextureDescriptor* textureDescriptor = [MTLTextureDescriptor
-        texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
-        width:static_cast<NSUInteger>(image_width)
-        height:static_cast<NSUInteger>(image_height)
-        mipmapped:NO];
+    MTLTextureDescriptor *textureDescriptor =
+        [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+                                                           width:static_cast<NSUInteger>(image_width)
+                                                          height:static_cast<NSUInteger>(image_height)
+                                                       mipmapped:NO];
     textureDescriptor.usage = MTLTextureUsageShaderRead;
     textureDescriptor.storageMode = MTLStorageModeShared;
 
@@ -140,12 +137,11 @@ std::expected<TextureLoadResult, std::string> LoadTextureFromMemory(const void* 
         return std::unexpected("Failed to create Metal texture");
     }
 
-    [texture replaceRegion:MTLRegionMake2D(0, 0,
-                                           static_cast<NSUInteger>(image_width),
-                                           static_cast<NSUInteger>(image_height))
-                mipmapLevel:0
-                  withBytes:image_data
-                bytesPerRow:4 * static_cast<NSUInteger>(image_width)];
+    [texture
+        replaceRegion:MTLRegionMake2D(0, 0, static_cast<NSUInteger>(image_width), static_cast<NSUInteger>(image_height))
+          mipmapLevel:0
+            withBytes:image_data
+          bytesPerRow:4 * static_cast<NSUInteger>(image_width)];
 
     TextureLoadResult result;
     result.texture.reset(texture);
@@ -156,8 +152,7 @@ std::expected<TextureLoadResult, std::string> LoadTextureFromMemory(const void* 
 }
 
 [[nodiscard]]
-std::expected<TextureLoadResult, std::string> LoadTextureFromFile(const char* fileName)
-{
+std::expected<TextureLoadResult, std::string> LoadTextureFromFile(const char *fileName) {
     std::ifstream file(fileName, std::ios::binary | std::ios::ate);
     if (!file) {
         return std::unexpected(std::format("Failed to open file: {}", fileName));
@@ -172,31 +167,29 @@ std::expected<TextureLoadResult, std::string> LoadTextureFromFile(const char* fi
 
     std::vector<char> fileData(static_cast<size_t>(fileSize));
     if (!file.read(fileData.data(), fileSize)) {
-        return std::unexpected(std::format(
-            "Failed to read file: expected {} bytes", fileSize));
+        return std::unexpected(std::format("Failed to read file: expected {} bytes", fileSize));
     }
 
-    return LoadTextureFromMemory(fileData.data(),
-                                 static_cast<size_t>(fileSize));
+    return LoadTextureFromMemory(fileData.data(), static_cast<size_t>(fileSize));
 }
 
 namespace AccountProcessor {
     using AccountSnapshot = AccountData;
 
     struct ProcessResult {
-        int id;
-        std::string userId;
-        std::string username;
-        std::string displayName;
-        std::string status;
-        std::string lastLocation;
-        uint64_t placeId = 0;
-        std::string jobId;
-        std::string voiceStatus;
-        time_t banExpiry = 0;
-        time_t voiceBanExpiry = 0;
-        bool shouldDeselect = false;
-        bool isInvalid = false;
+            int id;
+            std::string userId;
+            std::string username;
+            std::string displayName;
+            std::string status;
+            std::string lastLocation;
+            uint64_t placeId = 0;
+            std::string jobId;
+            std::string voiceStatus;
+            time_t banExpiry = 0;
+            time_t voiceBanExpiry = 0;
+            bool shouldDeselect = false;
+            bool isInvalid = false;
     };
 
     [[nodiscard]]
@@ -206,8 +199,8 @@ namespace AccountProcessor {
     }
 
     [[nodiscard]]
-    ProcessResult processAccount(const AccountSnapshot& account) {
-        ProcessResult result{
+    ProcessResult processAccount(const AccountSnapshot &account) {
+        ProcessResult result {
             .id = account.id,
             .userId = account.userId,
             .username = account.username,
@@ -230,8 +223,8 @@ namespace AccountProcessor {
 
         const uint64_t userId = userJson.value("id", 0ULL);
         result.userId = std::to_string(userId);
-        result.username = userJson.value("name", std::string{});
-        result.displayName = userJson.value("displayName", std::string{});
+        result.username = userJson.value("name", std::string {});
+        result.displayName = userJson.value("displayName", std::string {});
 
         if (userId == 0) {
             result.status = "Error";
@@ -240,28 +233,28 @@ namespace AccountProcessor {
 
         auto banInfo = Roblox::checkBanStatus(account.cookie);
         switch (banInfo.status) {
-                case Roblox::BanCheckResult::InvalidCookie:
-                    result.isInvalid = true;
-                    break;
+            case Roblox::BanCheckResult::InvalidCookie:
+                result.isInvalid = true;
+                break;
 
-                case Roblox::BanCheckResult::Banned:
-                    result.status = "Banned";
-                    result.banExpiry = banInfo.endDate;
-                    result.voiceStatus = "N/A";
-                    result.shouldDeselect = true;
-                    return result;
+            case Roblox::BanCheckResult::Banned:
+                result.status = "Banned";
+                result.banExpiry = banInfo.endDate;
+                result.voiceStatus = "N/A";
+                result.shouldDeselect = true;
+                return result;
 
-                case Roblox::BanCheckResult::Warned:
-                    break;
+            case Roblox::BanCheckResult::Warned:
+                break;
 
-                case Roblox::BanCheckResult::Terminated:
-                    break;
+            case Roblox::BanCheckResult::Terminated:
+                break;
 
-                case Roblox::BanCheckResult::Unbanned:
-                    break;
+            case Roblox::BanCheckResult::Unbanned:
+                break;
 
-                case Roblox::BanCheckResult::NetworkError:
-                    break;
+            case Roblox::BanCheckResult::NetworkError:
+                break;
         }
 
         auto voiceStatus = Roblox::getVoiceChatStatus(account.cookie);
@@ -270,7 +263,7 @@ namespace AccountProcessor {
 
         auto presences = Roblox::getPresences({userId}, account.cookie);
         if (auto it = presences.find(userId); it != presences.end()) {
-            const auto& presence = it->second;
+            const auto &presence = it->second;
             result.status = presence.presence;
             result.lastLocation = presence.lastLocation;
             result.placeId = presence.placeId;
@@ -282,11 +275,11 @@ namespace AccountProcessor {
         return result;
     }
 
-    void applyResults(const std::vector<ProcessResult>& results) {
+    void applyResults(const std::vector<ProcessResult> &results) {
         std::unique_lock lock(g_accountsMutex);
 
-        for (const auto& result : results) {
-            auto it = std::ranges::find_if(g_accounts, [&result](const AccountData& a) {
+        for (const auto &result: results) {
+            auto it = std::ranges::find_if(g_accounts, [&result](const AccountData &a) {
                 return a.id == result.id;
             });
 
@@ -321,20 +314,19 @@ namespace AccountProcessor {
             return;
         }
 
-        ThreadTask::RunOnMain([ids = std::move(invalidIds),
-                               names = std::move(invalidNames)]() {
+        ThreadTask::RunOnMain([ids = std::move(invalidIds), names = std::move(invalidNames)]() {
             auto message = std::format("Invalid cookies for: {}. Remove them?", names);
 
             ModalPopup::AddYesNo(message.c_str(), [ids]() {
                 std::unique_lock lock(g_accountsMutex);
 
-                std::erase_if(g_accounts, [&ids](const AccountData& a) {
+                std::erase_if(g_accounts, [&ids](const AccountData &a) {
                     return std::ranges::find(ids, a.id) != ids.end();
                 });
 
                 invalidateAccountIndex();
 
-                for (int id : ids) {
+                for (int id: ids) {
                     g_selectedAccountIds.erase(id);
                 }
 
@@ -342,7 +334,7 @@ namespace AccountProcessor {
             });
         });
     }
-}
+} // namespace AccountProcessor
 
 void refreshAccounts() {
     auto snapshots = AccountProcessor::takeAccountSnapshots();
@@ -353,7 +345,7 @@ void refreshAccounts() {
     std::vector<int> invalidIds;
     std::string invalidNames;
 
-    for (const auto& snapshot : snapshots) {
+    for (const auto &snapshot: snapshots) {
         auto result = AccountProcessor::processAccount(snapshot);
 
         if (result.isInvalid) {
@@ -385,8 +377,9 @@ void startAccountRefreshLoop() {
         while (g_running.load(std::memory_order_relaxed)) {
             std::this_thread::sleep_for(std::chrono::minutes(g_statusRefreshInterval));
 
-            if (!g_running.load())
+            if (!g_running.load()) {
                 break;
+            }
 
             refreshAccounts();
         }
@@ -420,10 +413,10 @@ void initializeAutoUpdater() {
 
         Creating Delta Patches
         Windows (xdelta3):
-        ```xdelta3 -e -s AltMan-1.0.0-Windows-x86_64.exe AltMan-1.1.0-Windows-x86_64.exe AltMan-Delta-1.0.0-to-1.1.0-Windows-x86_64.xdelta```
-        ```xdelta3 -e -s AltMan-1.0.0-Windows-arm64.exe AltMan-1.1.0-Windows-arm64.exe AltMan-Delta-1.0.0-to-1.1.0-Windows-arm64.xdelta```
-        macOS (bsdiff):
-        Extract slices
+        ```xdelta3 -e -s AltMan-1.0.0-Windows-x86_64.exe AltMan-1.1.0-Windows-x86_64.exe
+       AltMan-Delta-1.0.0-to-1.1.0-Windows-x86_64.xdelta```
+        ```xdelta3 -e -s AltMan-1.0.0-Windows-arm64.exe AltMan-1.1.0-Windows-arm64.exe
+       AltMan-Delta-1.0.0-to-1.1.0-Windows-arm64.xdelta``` macOS (bsdiff): Extract slices
         ```lipo AltMan-1.0.0.app/Contents/MacOS/AltMan -thin arm64 -output old.arm64```
         ```lipo AltMan-1.1.0.app/Contents/MacOS/AltMan -thin arm64 -output new.arm64```
 
@@ -451,7 +444,7 @@ void initializeAutoUpdater() {
 @end
 
 @implementation AppDelegate
-- (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)sender {
+- (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender {
     return YES;
 }
 @end
@@ -460,9 +453,9 @@ void initializeAutoUpdater() {
 @end
 
 @implementation AppViewController {
-    MTKView* _view;
+    MTKView *_view;
     id<MTLCommandQueue> _commandQueue;
-    ImGuiContext* _imguiContext;
+    ImGuiContext *_imguiContext;
     float _lastDPIScale;
 }
 
@@ -477,7 +470,7 @@ void initializeAutoUpdater() {
         IMGUI_CHECKVERSION();
         _imguiContext = ImGui::CreateContext();
 
-        ImGuiIO& io = ImGui::GetIO();
+        ImGuiIO &io = ImGui::GetIO();
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 
@@ -521,13 +514,12 @@ void initializeAutoUpdater() {
     ReloadFonts(_lastDPIScale);
 }
 
-- (void)drawInMTKView:(MTKView*)view {
+- (void)drawInMTKView:(MTKView *)view {
     IM_ASSERT([NSThread isMainThread]);
 
     ThreadTask::RunOnMainUpdate();
 
-    const CGFloat framebufferScale = view.window.screen.backingScaleFactor
-                                   ?: NSScreen.mainScreen.backingScaleFactor;
+    const CGFloat framebufferScale = view.window.screen.backingScaleFactor ?: NSScreen.mainScreen.backingScaleFactor;
 
     const float currentScale = static_cast<float>(framebufferScale);
     if (std::abs(currentScale - _lastDPIScale) > 0.01f) {
@@ -535,7 +527,7 @@ void initializeAutoUpdater() {
         ReloadFonts(_lastDPIScale);
     }
 
-    ImGuiIO& io = ImGui::GetIO();
+    ImGuiIO &io = ImGui::GetIO();
 
     io.DisplaySize = ImVec2(
         static_cast<float>(view.drawableSize.width) / currentScale,
@@ -544,7 +536,7 @@ void initializeAutoUpdater() {
     io.DisplayFramebufferScale = ImVec2(currentScale, currentScale);
 
     id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
-    MTLRenderPassDescriptor* renderPassDescriptor = view.currentRenderPassDescriptor;
+    MTLRenderPassDescriptor *renderPassDescriptor = view.currentRenderPassDescriptor;
 
     if (!renderPassDescriptor) {
         return;
@@ -554,7 +546,7 @@ void initializeAutoUpdater() {
     ImGui_ImplOSX_NewFrame(view);
     ImGui::NewFrame();
 
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const ImGuiViewport *viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(viewport->WorkSize);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
@@ -573,11 +565,10 @@ void initializeAutoUpdater() {
     ImGui::PopStyleVar(1);
     ImGui::Render();
 
-    ImDrawData* drawData = ImGui::GetDrawData();
-    id<MTLRenderCommandEncoder> renderEncoder =
-        [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
+    ImDrawData *drawData = ImGui::GetDrawData();
+    id<MTLRenderCommandEncoder> renderEncoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
 
-    [renderEncoder pushDebugGroup:@"Dear ImGui rendering"];
+    [renderEncoder pushDebugGroup:@ "Dear ImGui rendering"];
     ImGui_ImplMetal_RenderDrawData(drawData, commandBuffer, renderEncoder);
     [renderEncoder popDebugGroup];
     [renderEncoder endEncoding];
@@ -590,34 +581,31 @@ void initializeAutoUpdater() {
     }
 }
 
-- (void)mtkView:(MTKView*)view drawableSizeWillChange:(CGSize)size {
-
+- (void)mtkView:(MTKView *)view drawableSizeWillChange:(CGSize)size {
 }
 
 @end
 
-NSWindow* createMainWindow() {
+NSWindow *createMainWindow() {
     constexpr CGFloat windowWidth = 1000.0;
     constexpr CGFloat windowHeight = 560.0;
 
     NSRect frame = NSMakeRect(0, 0, windowWidth, windowHeight);
 
-    NSWindow* window = [[NSWindow alloc]
-        initWithContentRect:frame
-        styleMask:NSWindowStyleMaskTitled |
-                  NSWindowStyleMaskClosable |
-                  NSWindowStyleMaskResizable |
-                  NSWindowStyleMaskMiniaturizable
-        backing:NSBackingStoreBuffered
-        defer:NO];
+    NSWindow *window =
+        [[NSWindow alloc] initWithContentRect:frame
+                                    styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
+                                              | NSWindowStyleMaskResizable | NSWindowStyleMaskMiniaturizable
+                                      backing:NSBackingStoreBuffered
+                                        defer:NO];
 
-    [window setTitle:@"AltMan"];
+    [window setTitle:@ "AltMan"];
     [window center];
 
     return window;
 }
 
-int main(int argc, const char* argv[]) {
+int main(int argc, const char *argv[]) {
     @autoreleasepool {
         if (auto result = Crypto::initialize(); !result) {
             std::println("Failed to initialize crypto library {}", Crypto::errorToString(result.error()));
@@ -635,14 +623,14 @@ int main(int argc, const char* argv[]) {
 
         startAccountRefreshLoop();
 
-        NSApplication* app = [NSApplication sharedApplication];
+        NSApplication *app = [NSApplication sharedApplication];
         [app setActivationPolicy:NSApplicationActivationPolicyRegular];
 
-        AppDelegate* appDelegate = [[AppDelegate alloc] init];
+        AppDelegate *appDelegate = [[AppDelegate alloc] init];
         [app setDelegate:appDelegate];
 
-        NSWindow* window = createMainWindow();
-        AppViewController* viewController = [[AppViewController alloc] init];
+        NSWindow *window = createMainWindow();
+        AppViewController *viewController = [[AppViewController alloc] init];
         [window setContentViewController:viewController];
 
         [window makeKeyAndOrderFront:nil];
