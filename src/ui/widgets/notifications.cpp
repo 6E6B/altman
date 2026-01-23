@@ -1,9 +1,11 @@
 #include "notifications.h"
+
 #include <algorithm>
 #include <cstdio>
-#include <imgui.h>
 #include <mutex>
 #include <vector>
+
+#include <imgui.h>
 
 namespace {
     std::vector<UpdateNotification::Notification> activeNotifications;
@@ -11,38 +13,49 @@ namespace {
     uint64_t nextNotificationId = 0;
 
     struct PositionOffsets {
-        float topLeft = 20.0f;
-        float topRight = 20.0f;
-        float bottomLeft = 20.0f;
-        float bottomRight = 20.0f;
+            float topLeft = 20.0f;
+            float topRight = 20.0f;
+            float bottomLeft = 20.0f;
+            float bottomRight = 20.0f;
 
-        void reset() noexcept {
-            topLeft = topRight = bottomLeft = bottomRight = 20.0f;
-        }
-
-        float& get(NotificationPosition pos) noexcept {
-            switch (pos) {
-                case NotificationPosition::TopLeft: return topLeft;
-                case NotificationPosition::TopRight: return topRight;
-                case NotificationPosition::BottomLeft: return bottomLeft;
-                case NotificationPosition::BottomRight: return bottomRight;
+            void reset() noexcept {
+                topLeft = topRight = bottomLeft = bottomRight = 20.0f;
             }
-            return topRight;
-        }
+
+            float &get(NotificationPosition pos) noexcept {
+                switch (pos) {
+                    case NotificationPosition::TopLeft:
+                        return topLeft;
+                    case NotificationPosition::TopRight:
+                        return topRight;
+                    case NotificationPosition::BottomLeft:
+                        return bottomLeft;
+                    case NotificationPosition::BottomRight:
+                        return bottomRight;
+                }
+                return topRight;
+            }
     };
+} // namespace
+
+UpdateNotification::Notification::Notification(std::string t, std::string m, float life) :
+    title(std::move(t)),
+    message(std::move(m)),
+    lifetime(life),
+    id(nextNotificationId++) {
 }
 
-UpdateNotification::Notification::Notification(std::string t, std::string m, float life)
-    : title(std::move(t)), message(std::move(m)), lifetime(life), id(nextNotificationId++) {}
-
-void UpdateNotification::Show(std::string title, std::string message,
-                              float lifetime, std::function<void()> onClick) {
+void UpdateNotification::Show(std::string title, std::string message, float lifetime, std::function<void()> onClick) {
     Show(std::move(title), std::move(message), NotificationPosition::TopRight, lifetime, std::move(onClick));
 }
 
-void UpdateNotification::Show(std::string title, std::string message,
-                              NotificationPosition position, float lifetime,
-                              std::function<void()> onClick) {
+void UpdateNotification::Show(
+    std::string title,
+    std::string message,
+    NotificationPosition position,
+    float lifetime,
+    std::function<void()> onClick
+) {
     std::lock_guard lock(notificationMutex);
 
     while (activeNotifications.size() >= MaxNotifications) {
@@ -55,15 +68,16 @@ void UpdateNotification::Show(std::string title, std::string message,
     activeNotifications.push_back(std::move(notif));
 }
 
-uint64_t UpdateNotification::ShowPersistent(std::string title, std::string message,
-                                            std::function<void()> onClick) {
-    return ShowPersistent(std::move(title), std::move(message),
-                          NotificationPosition::TopRight, std::move(onClick));
+uint64_t UpdateNotification::ShowPersistent(std::string title, std::string message, std::function<void()> onClick) {
+    return ShowPersistent(std::move(title), std::move(message), NotificationPosition::TopRight, std::move(onClick));
 }
 
-uint64_t UpdateNotification::ShowPersistent(std::string title, std::string message,
-                                            NotificationPosition position,
-                                            std::function<void()> onClick) {
+uint64_t UpdateNotification::ShowPersistent(
+    std::string title,
+    std::string message,
+    NotificationPosition position,
+    std::function<void()> onClick
+) {
     std::lock_guard lock(notificationMutex);
 
     while (activeNotifications.size() >= MaxNotifications) {
@@ -82,7 +96,7 @@ uint64_t UpdateNotification::ShowPersistent(std::string title, std::string messa
 
 void UpdateNotification::Dismiss(uint64_t id) noexcept {
     std::lock_guard lock(notificationMutex);
-    for (auto& notif : activeNotifications) {
+    for (auto &notif: activeNotifications) {
         if (notif.id == id) {
             notif.markedForRemoval = true;
             break;
@@ -93,7 +107,7 @@ void UpdateNotification::Dismiss(uint64_t id) noexcept {
 void UpdateNotification::Update(float deltaTime) noexcept {
     std::lock_guard lock(notificationMutex);
 
-    std::erase_if(activeNotifications, [deltaTime](Notification& notif) {
+    std::erase_if(activeNotifications, [deltaTime](Notification &notif) {
         if (notif.markedForRemoval) {
             return true;
         }
@@ -112,7 +126,7 @@ void UpdateNotification::Render() {
         return;
     }
 
-    ImGuiIO& io = ImGui::GetIO();
+    ImGuiIO &io = ImGui::GetIO();
 
     constexpr float WINDOW_WIDTH = 300.0f;
     constexpr float BUTTON_SIZE = 20.0f;
@@ -123,13 +137,14 @@ void UpdateNotification::Render() {
 
     PositionOffsets offsets;
 
-    for (auto& notif : activeNotifications) {
-        float& yOffset = offsets.get(notif.position);
+    for (auto &notif: activeNotifications) {
+        float &yOffset = offsets.get(notif.position);
 
-        const bool isBottom = (notif.position == NotificationPosition::BottomLeft ||
-                               notif.position == NotificationPosition::BottomRight);
-        const bool isLeft = (notif.position == NotificationPosition::TopLeft ||
-                             notif.position == NotificationPosition::BottomLeft);
+        const bool isBottom
+            = (notif.position == NotificationPosition::BottomLeft
+               || notif.position == NotificationPosition::BottomRight);
+        const bool isLeft
+            = (notif.position == NotificationPosition::TopLeft || notif.position == NotificationPosition::BottomLeft);
 
         const float xPos = isLeft ? EDGE_MARGIN : (io.DisplaySize.x - WINDOW_WIDTH - EDGE_MARGIN);
         const float yPos = isBottom ? (io.DisplaySize.y - yOffset - 110.0f) : yOffset;
@@ -137,10 +152,8 @@ void UpdateNotification::Render() {
         ImGui::SetNextWindowPos(ImVec2(xPos, yPos));
         ImGui::SetNextWindowSize(ImVec2(WINDOW_WIDTH, 0));
 
-        constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration |
-                                           ImGuiWindowFlags_NoMove |
-                                           ImGuiWindowFlags_NoSavedSettings |
-                                           ImGuiWindowFlags_AlwaysAutoResize;
+        constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove
+                                           | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize;
 
         ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, ROUNDING);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(WINDOW_PADDING, WINDOW_PADDING));

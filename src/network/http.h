@@ -1,122 +1,118 @@
 #pragma once
 
-#include <string>
-#include <map>
-#include <vector>
-#include <initializer_list>
-#include <functional>
-#include <span>
 #include <atomic>
+#include <functional>
+#include <initializer_list>
+#include <map>
+#include <span>
+#include <string>
+#include <vector>
+
 #include <cpr/cpr.h>
 #include <nlohmann/json.hpp>
 
 namespace HttpClient {
 
-struct Response {
-    int status_code;
-    std::string text;
-    std::map<std::string, std::string> headers;
-    std::string final_url;
-};
+    struct Response {
+            int status_code;
+            std::string text;
+            std::map<std::string, std::string> headers;
+            std::string final_url;
+    };
 
-struct BinaryResponse {
-    int status_code;
-    std::vector<uint8_t> data;
-    std::map<std::string, std::string> headers;
-    std::string final_url;
-};
+    struct BinaryResponse {
+            int status_code;
+            std::vector<uint8_t> data;
+            std::map<std::string, std::string> headers;
+            std::string final_url;
+    };
 
-using ProgressCallback = std::function<void(size_t downloaded, size_t total)>;
-using ExtendedProgressCallback = std::function<void(size_t downloaded, size_t total, size_t bytesPerSecond)>;
+    using ProgressCallback = std::function<void(size_t downloaded, size_t total)>;
+    using ExtendedProgressCallback = std::function<void(size_t downloaded, size_t total, size_t bytesPerSecond)>;
 
-struct DownloadControl {
-    std::atomic<bool>* shouldCancel{nullptr};
-    std::atomic<bool>* isPaused{nullptr};
-    size_t bandwidthLimit{0};  // bytes per second, 0 = unlimited
-};
+    struct DownloadControl {
+            std::atomic<bool> *shouldCancel {nullptr};
+            std::atomic<bool> *isPaused {nullptr};
+            size_t bandwidthLimit {0}; // bytes per second, 0 = unlimited
+    };
 
-struct StreamingDownloadResult {
-    int status_code{0};
-    size_t bytesDownloaded{0};
-    size_t totalBytes{0};
-    bool wasCancelled{false};
-    std::string error;
-};
+    struct StreamingDownloadResult {
+            int status_code {0};
+            size_t bytesDownloaded {0};
+            size_t totalBytes {0};
+            bool wasCancelled {false};
+            std::string error;
+    };
 
-std::string build_kv_string(
-    std::initializer_list<std::pair<const std::string, std::string>> items,
-    char sep = '&'
-);
+    std::string build_kv_string(std::initializer_list<std::pair<const std::string, std::string>> items, char sep = '&');
 
-Response get(
-    const std::string& url,
-    std::initializer_list<std::pair<std::string, std::string>> headers = {},
-    const cpr::Parameters& params = {},
-    bool follow_redirects = true,
-    int max_redirects = 10
-);
+    Response
+    get(const std::string &url,
+        std::initializer_list<std::pair<std::string, std::string>> headers = {},
+        const cpr::Parameters &params = {},
+        bool follow_redirects = true,
+        int max_redirects = 10);
 
-Response get(
-    const std::string& url,
-    std::span<const std::pair<std::string, std::string>> headers,
-    const cpr::Parameters& params = {},
-    bool follow_redirects = true,
-    int max_redirects = 10
-);
+    Response
+    get(const std::string &url,
+        std::span<const std::pair<std::string, std::string>> headers,
+        const cpr::Parameters &params = {},
+        bool follow_redirects = true,
+        int max_redirects = 10);
 
-BinaryResponse get_binary(
-    const std::string& url,
-    std::initializer_list<std::pair<const std::string, std::string>> headers = {},
-    cpr::Parameters params = {},
-    bool follow_redirects = true,
-    int max_redirects = 10
-);
+    BinaryResponse get_binary(
+        const std::string &url,
+        std::initializer_list<std::pair<const std::string, std::string>> headers = {},
+        cpr::Parameters params = {},
+        bool follow_redirects = true,
+        int max_redirects = 10
+    );
 
-Response post(
-    const std::string& url,
-    std::initializer_list<std::pair<const std::string, std::string>> headers = {},
-    const std::string& jsonBody = std::string(),
-    std::initializer_list<std::pair<const std::string, std::string>> form = {},
-    bool follow_redirects = true,
-    int max_redirects = 10
-);
+    Response post(
+        const std::string &url,
+        std::initializer_list<std::pair<const std::string, std::string>> headers = {},
+        const std::string &jsonBody = std::string(),
+        std::initializer_list<std::pair<const std::string, std::string>> form = {},
+        bool follow_redirects = true,
+        int max_redirects = 10
+    );
 
-bool download(
-    const std::string& url,
-    const std::string& output_path,
-    std::initializer_list<std::pair<const std::string, std::string>> headers = {},
-    ProgressCallback progress_cb = nullptr
-);
+    bool download(
+        const std::string &url,
+        const std::string &output_path,
+        std::initializer_list<std::pair<const std::string, std::string>> headers = {},
+        ProgressCallback progress_cb = nullptr
+    );
 
-StreamingDownloadResult download_streaming(
-    const std::string& url,
-    const std::string& output_path,
-    std::vector<std::pair<std::string, std::string>> headers = {},
-    size_t resumeOffset = 0,
-    ExtendedProgressCallback progress_cb = nullptr,
-    DownloadControl control = {}
-);
+    StreamingDownloadResult download_streaming(
+        const std::string &url,
+        const std::string &output_path,
+        std::vector<std::pair<std::string, std::string>> headers = {},
+        size_t resumeOffset = 0,
+        ExtendedProgressCallback progress_cb = nullptr,
+        DownloadControl control = {}
+    );
 
-class DownloadSession {
-private:
-    class Impl;
-    std::unique_ptr<Impl> impl_;
+    class DownloadSession {
+        private:
+            class Impl;
+            std::unique_ptr<Impl> impl_;
 
-public:
-    DownloadSession();
-    ~DownloadSession();
+        public:
+            DownloadSession();
+            ~DownloadSession();
 
-    DownloadSession(const DownloadSession&) = delete;
-    DownloadSession& operator=(const DownloadSession&) = delete;
-    DownloadSession(DownloadSession&&) noexcept;
-    DownloadSession& operator=(DownloadSession&&) noexcept;
+            DownloadSession(const DownloadSession &) = delete;
+            DownloadSession &operator=(const DownloadSession &) = delete;
+            DownloadSession(DownloadSession &&) noexcept;
+            DownloadSession &operator=(DownloadSession &&) noexcept;
 
-    void set_url(const std::string& url);
-    void set_headers(std::initializer_list<std::pair<const std::string, std::string>> headers);
-    void set_follow_redirects(bool follow, int max_redirects = 10);
-    bool download_to_file(const std::string& output_path, ProgressCallback progress_cb = nullptr);
-};
+            void set_url(const std::string &url);
+            void set_headers(std::initializer_list<std::pair<const std::string, std::string>> headers);
+            void set_follow_redirects(bool follow, int max_redirects = 10);
+            bool download_to_file(const std::string &output_path, ProgressCallback progress_cb = nullptr);
+    };
 
-nlohmann::json decode(const Response& response);
+    nlohmann::json decode(const Response &response);
 
-}
+} // namespace HttpClient

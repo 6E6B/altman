@@ -7,56 +7,58 @@
 #include <fstream>
 #include <iomanip>
 #include <random>
-#include <sstream>
 #include <regex>
+#include <sstream>
 
 #ifdef _WIN32
 #include <windows.h>
 #include <shellapi.h>
 #elif __APPLE__
-#include <unistd.h>
 #include <spawn.h>
 #include <sys/wait.h>
+#include <unistd.h>
+
 #include "utils/paths.h"
 #endif
 
-#include "network/http.h"
-#include "console/console.h"
-#include "utils/account_utils.h"
-#include "ui/widgets/notifications.h"
 #include "components/data.h"
-#include "roblox_control.h"
+#include "console/console.h"
 #include "multi_instance.h"
+#include "network/http.h"
+#include "roblox_control.h"
+#include "ui/widgets/notifications.h"
+#include "utils/account_utils.h"
 #include "utils/thread_task.h"
 
 LaunchParams LaunchParams::standard(uint64_t placeId) {
     return {LaunchMode::Job, placeId, ""};
 }
 
-LaunchParams LaunchParams::gameJob(uint64_t placeId, const std::string& jobId) {
+LaunchParams LaunchParams::gameJob(uint64_t placeId, const std::string &jobId) {
     return {LaunchMode::GameJob, placeId, jobId};
 }
 
-LaunchParams LaunchParams::privateServer(const std::string& shareLink) {
+LaunchParams LaunchParams::privateServer(const std::string &shareLink) {
     return {LaunchMode::PrivateServer, 0, shareLink};
 }
 
-LaunchParams LaunchParams::privateServerDirect(uint64_t placeId, const std::string& accessCode) {
+LaunchParams LaunchParams::privateServerDirect(uint64_t placeId, const std::string &accessCode) {
     return {LaunchMode::PrivateServerDirect, placeId, accessCode};
 }
 
-LaunchParams LaunchParams::followUser(const std::string& userId) {
+LaunchParams LaunchParams::followUser(const std::string &userId) {
     return {LaunchMode::FollowUser, 0, userId};
 }
 
-std::string urlEncode(const std::string& s) {
+std::string urlEncode(const std::string &s) {
     std::ostringstream out;
     out << std::hex << std::uppercase;
-    for (unsigned char c : s) {
-        if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~')
+    for (unsigned char c: s) {
+        if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
             out << c;
-        else
+        } else {
             out << '%' << std::setw(2) << std::setfill('0') << static_cast<int>(c);
+        }
     }
     return out.str();
 }
@@ -70,15 +72,18 @@ std::string generateBrowserTrackerId() {
 }
 
 std::string getCurrentTimestampMs() {
-    auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count();
+    auto nowMs
+        = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+              .count();
     return std::to_string(nowMs);
 }
 
-std::optional<std::string> fetchCsrfToken(const std::string& cookie) {
+std::optional<std::string> fetchCsrfToken(const std::string &cookie) {
     auto response = HttpClient::post(
         "https://auth.roblox.com/v1/authentication-ticket",
-        {{"Cookie", std::format(".ROBLOSECURITY={}", cookie)}}
+        {
+            {"Cookie", std::format(".ROBLOSECURITY={}", cookie)}
+    }
     );
 
     auto it = response.headers.find("x-csrf-token");
@@ -90,7 +95,7 @@ std::optional<std::string> fetchCsrfToken(const std::string& cookie) {
     return it->second;
 }
 
-std::optional<std::string> fetchAuthTicket(const std::string& cookie, const std::string& csrfToken) {
+std::optional<std::string> fetchAuthTicket(const std::string &cookie, const std::string &csrfToken) {
     auto response = HttpClient::post(
         "https://auth.roblox.com/v1/authentication-ticket",
         {
@@ -98,7 +103,7 @@ std::optional<std::string> fetchAuthTicket(const std::string& cookie, const std:
             {"Origin", "https://www.roblox.com"},
             {"Referer", "https://www.roblox.com/"},
             {"X-CSRF-TOKEN", csrfToken}
-        }
+    }
     );
 
     auto it = response.headers.find("rbx-authentication-ticket");
@@ -111,14 +116,19 @@ std::optional<std::string> fetchAuthTicket(const std::string& cookie, const std:
 }
 
 struct LaunchUrls {
-    std::string desktop;
-    std::string mobile;
-    uint64_t resolvedPlaceId;
+        std::string desktop;
+        std::string mobile;
+        uint64_t resolvedPlaceId;
 };
 
-bool resolvePrivateServer(const std::string& link, const std::string& cookie,
-                         const std::string& csrfToken, uint64_t& placeId,
-                         std::string& linkCode, std::string& accessCode) {
+bool resolvePrivateServer(
+    const std::string &link,
+    const std::string &cookie,
+    const std::string &csrfToken,
+    uint64_t &placeId,
+    std::string &linkCode,
+    std::string &accessCode
+) {
     std::smatch match;
 
     std::regex shareLinkRegex(R"(roblox\.com/share\?code=([^&]+)&type=Server)");
@@ -141,13 +151,13 @@ bool resolvePrivateServer(const std::string& link, const std::string& cookie,
         auto apiResponse = HttpClient::post(
             apiUrl,
             {
-                {"Cookie", ".ROBLOSECURITY=" + cookie},
-                {"X-CSRF-TOKEN", csrfToken},
-                {"Content-Type", "application/json;charset=UTF-8"},
-                {"Accept", "application/json, text/plain, */*"},
-                {"Origin", "https://www.roblox.com"},
-                {"Referer", "https://www.roblox.com/"},
-            },
+                {"Cookie",       ".ROBLOSECURITY=" + cookie         },
+                {"X-CSRF-TOKEN", csrfToken                          },
+                {"Content-Type", "application/json;charset=UTF-8"   },
+                {"Accept",       "application/json, text/plain, */*"},
+                {"Origin",       "https://www.roblox.com"           },
+                {"Referer",      "https://www.roblox.com/"          },
+        },
             jsonBody
         );
 
@@ -160,7 +170,7 @@ bool resolvePrivateServer(const std::string& link, const std::string& cookie,
             auto jsonResponse = HttpClient::decode(apiResponse);
 
             if (jsonResponse.contains("status") && jsonResponse["status"].is_string()) {
-                const auto& status = jsonResponse["status"].get<std::string>();
+                const auto &status = jsonResponse["status"].get<std::string>();
                 if (status == "Expired") {
                     LOG_ERROR("This private server link is no longer valid.");
                     return false;
@@ -176,7 +186,7 @@ bool resolvePrivateServer(const std::string& link, const std::string& cookie,
             placeId = invite["placeId"].get<uint64_t>();
             linkCode = invite["linkCode"].get<std::string>();
 
-        } catch (std::exception& e) {
+        } catch (std::exception &e) {
             LOG_ERROR("JSON parse error: {}", e.what());
             return false;
         }
@@ -187,17 +197,18 @@ bool resolvePrivateServer(const std::string& link, const std::string& cookie,
         linkCode = match[2].str();
     }
 
-    std::string gameUrl = std::format("https://www.roblox.com/games/{}/?privateServerLinkCode={}",
-        placeId, linkCode);
+    std::string gameUrl = std::format("https://www.roblox.com/games/{}/?privateServerLinkCode={}", placeId, linkCode);
 
     auto pageResponse = HttpClient::get(
         gameUrl,
         {
-            {"Cookie", ".ROBLOSECURITY=" + cookie},
-            {"X-CSRF-TOKEN", csrfToken},
-            {"User-Agent", "Mozilla/5.0"}
-        },
-        {}, true, 10
+            {"Cookie",       ".ROBLOSECURITY=" + cookie},
+            {"X-CSRF-TOKEN", csrfToken                 },
+            {"User-Agent",   "Mozilla/5.0"             }
+    },
+        {},
+        true,
+        10
     );
 
     std::regex accessCodeRegex(R"(Roblox\.GameLauncher\.joinPrivateGame\(\d+,\s*'([a-f0-9\-]+)',\s*'(\d+)')");
@@ -213,10 +224,12 @@ bool resolvePrivateServer(const std::string& link, const std::string& cookie,
     return true;
 }
 
-std::optional<LaunchUrls> buildLaunchUrls(const LaunchParams& params,
-                                          const std::string& browserTrackerId,
-                                          const std::string& cookie,
-                                          const std::string& csrfToken) {
+std::optional<LaunchUrls> buildLaunchUrls(
+    const LaunchParams &params,
+    const std::string &browserTrackerId,
+    const std::string &cookie,
+    const std::string &csrfToken
+) {
     LaunchUrls urls;
     urls.resolvedPlaceId = params.placeId;
     const auto placeIdStr = std::to_string(params.placeId);
@@ -236,10 +249,11 @@ std::optional<LaunchUrls> buildLaunchUrls(const LaunchParams& params,
             urls.desktop = std::format(
                 "https://assetgame.roblox.com/game/PlaceLauncher.ashx?"
                 "request=RequestPrivateGame&placeId={}&accessCode={}&linkCode={}",
-                resolvedPlaceIdStr, accessCode, linkCode
+                resolvedPlaceIdStr,
+                accessCode,
+                linkCode
             );
-            urls.mobile = std::format("placeId={}&accessCode={}&linkCode={}",
-                resolvedPlaceIdStr, accessCode, linkCode);
+            urls.mobile = std::format("placeId={}&accessCode={}&linkCode={}", resolvedPlaceIdStr, accessCode, linkCode);
 
             break;
         }
@@ -248,7 +262,8 @@ std::optional<LaunchUrls> buildLaunchUrls(const LaunchParams& params,
             urls.desktop = std::format(
                 "https://assetgame.roblox.com/game/PlaceLauncher.ashx?"
                 "request=RequestPrivateGame&placeId={}&accessCode={}",
-                placeIdStr, params.value
+                placeIdStr,
+                params.value
             );
             urls.mobile = std::format("placeId={}&accessCode={}", placeIdStr, params.value);
             break;
@@ -267,11 +282,14 @@ std::optional<LaunchUrls> buildLaunchUrls(const LaunchParams& params,
                 "https://assetgame.roblox.com/game/PlaceLauncher.ashx?"
                 "request=RequestGameJob&browserTrackerId={}&placeId={}&gameId={}"
                 "&isPlayTogetherGame=false&isTeleport=true",
-                browserTrackerId, placeIdStr, params.value
+                browserTrackerId,
+                placeIdStr,
+                params.value
             );
             urls.mobile = std::format(
                 "placeId={}&gameId={}&isPlayTogetherGame=false&isTeleport=true",
-                placeIdStr, params.value
+                placeIdStr,
+                params.value
             );
             break;
 
@@ -280,7 +298,8 @@ std::optional<LaunchUrls> buildLaunchUrls(const LaunchParams& params,
             urls.desktop = std::format(
                 "https://assetgame.roblox.com/game/PlaceLauncher.ashx?"
                 "request=RequestGame&browserTrackerId={}&placeId={}&isPlayTogetherGame=false",
-                browserTrackerId, placeIdStr
+                browserTrackerId,
+                placeIdStr
             );
             urls.mobile = std::format("placeId={}&isPlayTogetherGame=false", placeIdStr);
             break;
@@ -289,9 +308,13 @@ std::optional<LaunchUrls> buildLaunchUrls(const LaunchParams& params,
     return urls;
 }
 
-std::string buildProtocolCommand(bool isMobile, const std::string& ticket,
-                                 const std::string& timestamp, const std::string& launchUrl,
-                                 const std::string& browserTrackerId) {
+std::string buildProtocolCommand(
+    bool isMobile,
+    const std::string &ticket,
+    const std::string &timestamp,
+    const std::string &launchUrl,
+    const std::string &browserTrackerId
+) {
     if (isMobile) {
         return std::format("roblox://{}", launchUrl);
     }
@@ -300,59 +323,61 @@ std::string buildProtocolCommand(bool isMobile, const std::string& ticket,
         "roblox-player:1+launchmode:play+gameinfo:{}+launchtime:{}+"
         "placelauncherurl:{}+browsertrackerid:{}+robloxLocale:en_us+"
         "gameLocale:en_us+channel:+LaunchExp:InApp",
-        ticket, timestamp, urlEncode(launchUrl), browserTrackerId
+        ticket,
+        timestamp,
+        urlEncode(launchUrl),
+        browserTrackerId
     );
 }
 
 #ifdef _WIN32
 
-bool startRoblox(const LaunchParams& params, AccountData acc) {
-	auto csrfToken = fetchCsrfToken(acc.cookie);
-	if (!csrfToken) {
-		LOG_ERROR("Failed to get CSRF token");
-		return false;
-	}
+bool startRoblox(const LaunchParams &params, AccountData acc) {
+    auto csrfToken = fetchCsrfToken(acc.cookie);
+    if (!csrfToken) {
+        LOG_ERROR("Failed to get CSRF token");
+        return false;
+    }
 
-	auto ticket = fetchAuthTicket(acc.cookie, *csrfToken);
-	if (!ticket) {
-		LOG_ERROR("Failed to get authentication ticket");
-		return false;
-	}
+    auto ticket = fetchAuthTicket(acc.cookie, *csrfToken);
+    if (!ticket) {
+        LOG_ERROR("Failed to get authentication ticket");
+        return false;
+    }
 
-	const auto browserTrackerId = generateBrowserTrackerId();
-	const auto timestamp = getCurrentTimestampMs();
+    const auto browserTrackerId = generateBrowserTrackerId();
+    const auto timestamp = getCurrentTimestampMs();
 
-	auto urls = buildLaunchUrls(params, browserTrackerId, acc.cookie, *csrfToken);
-	if (!urls) {
-		return false;
-	}
+    auto urls = buildLaunchUrls(params, browserTrackerId, acc.cookie, *csrfToken);
+    if (!urls) {
+        return false;
+    }
 
-	if (acc.username.empty()) {
-		LOG_ERROR("Username is empty or invalid");
-		return false;
-	}
+    if (acc.username.empty()) {
+        LOG_ERROR("Username is empty or invalid");
+        return false;
+    }
 
-	const auto& launchUrl = urls->desktop;
-	const auto protocolCommand = buildProtocolCommand(false, *ticket, timestamp,
-													  launchUrl, browserTrackerId);
+    const auto &launchUrl = urls->desktop;
+    const auto protocolCommand = buildProtocolCommand(false, *ticket, timestamp, launchUrl, browserTrackerId);
 
-	SHELLEXECUTEINFOA executionInfo{sizeof(executionInfo)};
-	executionInfo.fMask = SEE_MASK_NOCLOSEPROCESS;
-	executionInfo.lpVerb = "open";
-	executionInfo.lpFile = protocolCommand.c_str();
-	executionInfo.nShow = SW_SHOWNORMAL;
+    SHELLEXECUTEINFOA executionInfo {sizeof(executionInfo)};
+    executionInfo.fMask = SEE_MASK_NOCLOSEPROCESS;
+    executionInfo.lpVerb = "open";
+    executionInfo.lpFile = protocolCommand.c_str();
+    executionInfo.nShow = SW_SHOWNORMAL;
 
-	if (!ShellExecuteExA(&executionInfo)) {
-		LOG_ERROR("ShellExecuteExA failed for Roblox launch. Error: {}", GetLastError());
-		return false;
-	}
+    if (!ShellExecuteExA(&executionInfo)) {
+        LOG_ERROR("ShellExecuteExA failed for Roblox launch. Error: {}", GetLastError());
+        return false;
+    }
 
-	if (executionInfo.hProcess) {
-		CloseHandle(executionInfo.hProcess);
-	}
+    if (executionInfo.hProcess) {
+        CloseHandle(executionInfo.hProcess);
+    }
 
-	LOG_INFO("Roblox launched for account: {}", acc.username);
-	return true;
+    LOG_INFO("Roblox launched for account: {}", acc.username);
+    return true;
 }
 
 #elif __APPLE__
@@ -361,12 +386,12 @@ namespace {
     bool isMobileClient(std::string_view clientName) {
         return clientName == "Delta";
     }
-}
+} // namespace
 
-bool copyClientToUserEnvironment(const std::string& username, const std::string& clientName) {
+bool copyClientToUserEnvironment(const std::string &username, const std::string &clientName) {
     std::string baseClientName = "Default";
 
-    for (const auto& acc : g_accounts) {
+    for (const auto &acc: g_accounts) {
         if (acc.username == username) {
             if (!acc.customClientBase.empty()) {
                 baseClientName = acc.customClientBase;
@@ -375,7 +400,7 @@ bool copyClientToUserEnvironment(const std::string& username, const std::string&
         }
     }
 
-	auto appDataDir = AltMan::Paths::AppData();
+    auto appDataDir = AltMan::Paths::AppData();
 
     std::string sourcePath = std::format("{}/clients/{}.app", appDataDir.string(), baseClientName);
     std::string destPath = MultiInstance::getUserClientPath(username, clientName);
@@ -410,8 +435,7 @@ bool copyClientToUserEnvironment(const std::string& username, const std::string&
         }
     }
 
-    std::filesystem::copy(sourcePath, destPath,
-        std::filesystem::copy_options::recursive, ec);
+    std::filesystem::copy(sourcePath, destPath, std::filesystem::copy_options::recursive, ec);
 
     if (ec) {
         LOG_ERROR("Failed to copy client: {}", ec.message());
@@ -422,10 +446,9 @@ bool copyClientToUserEnvironment(const std::string& username, const std::string&
     return true;
 }
 
-bool createSandboxedRoblox(AccountData& acc, const std::string& protocolURL) {
-    std::string baseClientName = acc.isUsingCustomClient && !acc.customClientBase.empty()
-        ? acc.customClientBase
-        : "Default";
+bool createSandboxedRoblox(AccountData &acc, const std::string &protocolURL) {
+    std::string baseClientName
+        = acc.isUsingCustomClient && !acc.customClientBase.empty() ? acc.customClientBase : "Default";
 
     if (baseClientName == "Hydrogen" || baseClientName == "Delta") {
         auto keyIt = g_clientKeys.find(baseClientName);
@@ -468,7 +491,7 @@ bool createSandboxedRoblox(AccountData& acc, const std::string& protocolURL) {
         return false;
     }
 
-	MultiInstance::createKeychain(acc.username);
+    MultiInstance::createKeychain(acc.username);
     MultiInstance::unlockKeychain(acc.username);
 
     if (MultiInstance::needsBundleIdModification(acc.username, clientName, acc.username)) {
@@ -478,7 +501,8 @@ bool createSandboxedRoblox(AccountData& acc, const std::string& protocolURL) {
         }
     }
 
-    bool hasLaunched = MultiInstance::launchSandboxedClient(acc.username, clientName, acc.username, profilePath, protocolURL);
+    bool hasLaunched
+        = MultiInstance::launchSandboxedClient(acc.username, clientName, acc.username, profilePath, protocolURL);
 
     if (!hasLaunched) {
         LOG_ERROR("Failed to launch client");
@@ -493,7 +517,7 @@ bool createSandboxedRoblox(AccountData& acc, const std::string& protocolURL) {
     return true;
 }
 
-bool startRoblox(const LaunchParams& params, AccountData acc) {
+bool startRoblox(const LaunchParams &params, AccountData acc) {
     auto csrfToken = fetchCsrfToken(acc.cookie);
     if (!csrfToken) {
         LOG_ERROR("Failed to get CSRF token");
@@ -516,65 +540,65 @@ bool startRoblox(const LaunchParams& params, AccountData acc) {
 
     const bool isMobile = isMobileClient(acc.customClientBase);
     const auto launchUrl = isMobile ? urls->mobile : urls->desktop;
-    const auto protocolCommand = buildProtocolCommand(isMobile, *ticket, timestamp,
-                                                      launchUrl, browserTrackerId);
+    const auto protocolCommand = buildProtocolCommand(isMobile, *ticket, timestamp, launchUrl, browserTrackerId);
 
-	if (acc.username.empty()) {
-		LOG_ERROR("Username is empty or invalid");
-		return false;
-	}
+    if (acc.username.empty()) {
+        LOG_ERROR("Username is empty or invalid");
+        return false;
+    }
 
-	const auto clientName = std::format("Roblox_{}", acc.username);
-	if (acc.clientName != clientName) {
-		acc.clientName = clientName;
-		acc.isUsingCustomClient = true;
-		Data::SaveAccounts();
-	}
+    const auto clientName = std::format("Roblox_{}", acc.username);
+    if (acc.clientName != clientName) {
+        acc.clientName = clientName;
+        acc.isUsingCustomClient = true;
+        Data::SaveAccounts();
+    }
 
-	if (!createSandboxedRoblox(acc, protocolCommand)) {
-		LOG_ERROR("Failed to create sandboxed client instance");
-		return false;
-	}
+    if (!createSandboxedRoblox(acc, protocolCommand)) {
+        LOG_ERROR("Failed to create sandboxed client instance");
+        return false;
+    }
 
-	std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
-	return true;
+    return true;
 }
 #endif // APPLE
 
-void launchWithAccounts(const LaunchParams& params, const std::vector<AccountData>& accounts) {
-	if (g_killRobloxOnLaunch)
-		RobloxControl::KillRobloxProcesses();
-	if (g_clearCacheOnLaunch)
-		RobloxControl::ClearRobloxCache();
+void launchWithAccounts(const LaunchParams &params, const std::vector<AccountData> &accounts) {
+    if (g_killRobloxOnLaunch) {
+        RobloxControl::KillRobloxProcesses();
+    }
+    if (g_clearCacheOnLaunch) {
+        RobloxControl::ClearRobloxCache();
+    }
 
-	for (const AccountData acc : accounts) {
-		const bool success = startRoblox(params, acc);
+    for (const AccountData acc: accounts) {
+        const bool success = startRoblox(params, acc);
 
-		if (success) {
-			LOG_INFO("Roblox launched for account ID: {}", acc.id);
-			std::this_thread::sleep_for(std::chrono::milliseconds(500));
-		} else {
-			LOG_ERROR("Failed to start Roblox for account ID: {}", acc.id);
-		}
-	}
+        if (success) {
+            LOG_INFO("Roblox launched for account ID: {}", acc.id);
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        } else {
+            LOG_ERROR("Failed to start Roblox for account ID: {}", acc.id);
+        }
+    }
 }
 
 void launchWithSelectedAccounts(LaunchParams params) {
-	auto accountPtrs = getUsableSelectedAccounts();
-	if (accountPtrs.empty()) {
-		return;
-	}
+    auto accountPtrs = getUsableSelectedAccounts();
+    if (accountPtrs.empty()) {
+        return;
+    }
 
-	// Copy for thread safety
-	std::vector<AccountData> accounts;
-	accounts.reserve(accountPtrs.size());
-	for (AccountData* acc : accountPtrs) {
-		accounts.push_back(*acc);
-	}
+    // Copy for thread safety
+    std::vector<AccountData> accounts;
+    accounts.reserve(accountPtrs.size());
+    for (AccountData *acc: accountPtrs) {
+        accounts.push_back(*acc);
+    }
 
-	ThreadTask::fireAndForget([params = std::move(params),
-							   accounts = std::move(accounts)]() {
-		launchWithAccounts(params, accounts);
-	});
+    ThreadTask::fireAndForget([params = std::move(params), accounts = std::move(accounts)]() {
+        launchWithAccounts(params, accounts);
+    });
 }

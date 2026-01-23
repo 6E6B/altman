@@ -1,7 +1,7 @@
+#include <ctime>
 #include <iomanip>
 #include <sstream>
 #include <string>
-#include <ctime>
 
 #include "history_utils.h"
 #include "ui/windows/history/history_log_types.h"
@@ -9,7 +9,9 @@
 
 
 std::string friendlyTimestamp(const std::string &isoTimestamp) {
-    if (isoTimestamp.empty()) return isoTimestamp;
+    if (isoTimestamp.empty()) {
+        return isoTimestamp;
+    }
     return formatAbsoluteFromIso(isoTimestamp);
 }
 

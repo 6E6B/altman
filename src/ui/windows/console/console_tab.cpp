@@ -2,21 +2,21 @@
 
 #include <imgui.h>
 
-#include <vector>
-#include <string>
-#include <mutex>
-#include <chrono>
-#include <iomanip>
-#include <sstream>
 #include <algorithm>
 #include <cctype>
-#include <format>
-#include <thread>
+#include <chrono>
 #include <condition_variable>
+#include <format>
+#include <iomanip>
+#include <mutex>
+#include <sstream>
+#include <string>
+#include <thread>
+#include <vector>
 
 struct LogEntry {
-    Console::Level level;
-    std::string text;
+        Console::Level level;
+        std::string text;
 };
 
 static std::vector<LogEntry> g_logMessages;
@@ -37,7 +37,7 @@ static char g_searchBuffer[256] = "";
 static std::string getCurrentTimestamp() {
     auto now = std::chrono::system_clock::now();
     auto in_time_t = std::chrono::system_clock::to_time_t(now);
-    std::tm buf{};
+    std::tm buf {};
 
 #ifdef _WIN32
     localtime_s(&buf, &in_time_t);
@@ -51,17 +51,20 @@ static std::string getCurrentTimestamp() {
 }
 
 static std::string toLower(std::string s) {
-    std::transform(
-        s.begin(), s.end(), s.begin(),
-        [](unsigned char c) { return (char)std::tolower(c); });
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+        return (char) std::tolower(c);
+    });
     return s;
 }
 
-static const char* LevelPrefix(Console::Level level) {
+static const char *LevelPrefix(Console::Level level) {
     switch (level) {
-    case Console::Level::Info:  return "[INFO]";
-    case Console::Level::Warn:  return "[WARN]";
-    case Console::Level::Error: return "[ERROR]";
+        case Console::Level::Info:
+            return "[INFO]";
+        case Console::Level::Warn:
+            return "[WARN]";
+        case Console::Level::Error:
+            return "[ERROR]";
     }
     return "[UNK]";
 }
@@ -93,30 +96,26 @@ static void LoggerThreadFunc() {
 }
 
 static struct LoggerInit {
-    LoggerInit() {
-        g_loggerThread = std::thread(LoggerThreadFunc);
-    }
-    ~LoggerInit() {
-        g_loggerRunning = false;
-        g_logCv.notify_all();
-        if (g_loggerThread.joinable())
-            g_loggerThread.join();
-    }
+        LoggerInit() {
+            g_loggerThread = std::thread(LoggerThreadFunc);
+        }
+        ~LoggerInit() {
+            g_loggerRunning = false;
+            g_logCv.notify_all();
+            if (g_loggerThread.joinable()) {
+                g_loggerThread.join();
+            }
+        }
 } s_loggerInit;
 
 namespace Console {
 
-    void Log(Level level, const std::string& message) {
-        auto finalEntry = std::format(
-            "[{}] {} {}",
-            getCurrentTimestamp(),
-            LevelPrefix(level),
-            message
-        );
+    void Log(Level level, const std::string &message) {
+        auto finalEntry = std::format("[{}] {} {}", getCurrentTimestamp(), LevelPrefix(level), message);
 
         {
             std::lock_guard<std::mutex> lock(g_queueMutex);
-            g_pendingLogs.push_back({ level, finalEntry });
+            g_pendingLogs.push_back({level, finalEntry});
         }
         g_logCv.notify_one();
     }
@@ -129,21 +128,18 @@ namespace Console {
     std::vector<std::string> GetLogs() {
         std::lock_guard<std::mutex> lock(g_logMutex);
         std::vector<std::string> out;
-        for (const auto& e : g_logMessages)
+        for (const auto &e: g_logMessages) {
             out.push_back(e.text);
+        }
         return out;
     }
 
     void RenderConsoleTab() {
-        ImGuiStyle& style = ImGui::GetStyle();
+        ImGuiStyle &style = ImGui::GetStyle();
 
         float desiredTextIndent = style.WindowPadding.x;
 
-        ImGui::InputTextWithHint(
-            "##SearchLog",
-            "Search...",
-            g_searchBuffer,
-            IM_ARRAYSIZE(g_searchBuffer));
+        ImGui::InputTextWithHint("##SearchLog", "Search...", g_searchBuffer, IM_ARRAYSIZE(g_searchBuffer));
 
         ImGui::SameLine();
 
@@ -160,16 +156,22 @@ namespace Console {
         std::string searchLower = toLower(g_searchBuffer);
 
         std::lock_guard<std::mutex> lock(g_logMutex);
-        for (const auto& entry : g_logMessages) {
-            if (!searchLower.empty() &&
-                toLower(entry.text).find(searchLower) == std::string::npos)
+        for (const auto &entry: g_logMessages) {
+            if (!searchLower.empty() && toLower(entry.text).find(searchLower) == std::string::npos) {
                 continue;
+            }
 
             ImVec4 color;
             switch (entry.level) {
-            case Level::Info:  color = {0.85f, 0.85f, 0.85f, 1.0f}; break;
-            case Level::Warn:  color = {1.0f, 0.85f, 0.3f, 1.0f};  break;
-            case Level::Error: color = {1.0f, 0.4f, 0.4f, 1.0f};  break;
+                case Level::Info:
+                    color = {0.85f, 0.85f, 0.85f, 1.0f};
+                    break;
+                case Level::Warn:
+                    color = {1.0f, 0.85f, 0.3f, 1.0f};
+                    break;
+                case Level::Error:
+                    color = {1.0f, 0.4f, 0.4f, 1.0f};
+                    break;
             }
 
             ImGui::PushStyleColor(ImGuiCol_Text, color);
@@ -179,9 +181,10 @@ namespace Console {
             ImGui::PopStyleColor();
         }
 
-        if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
+        if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) {
             ImGui::SetScrollHereY(1.0f);
+        }
 
         ImGui::EndChild();
     }
-}
+} // namespace Console

@@ -1,17 +1,17 @@
 #include "bottom_right_status.h"
 
-#include <mutex>
 #include <cmath>
 #include <format>
+#include <mutex>
 
 namespace BottomRightStatus {
     namespace {
-        constexpr const char* ICON_MOON = "\xEF\x86\x86";
-        constexpr const char* ICON_CHECK = "\xEF\x80\x8C";
-        constexpr const char* ICON_SPINNER = "\xEF\x84\x90";
-        constexpr const char* ICON_TRIANGLE = "\xEF\x81\xB1";
-        constexpr const char* ICON_TIMES = "\xEF\x80\x8D";
-        constexpr const char* ICON_USER = "\xEF\x80\x87";
+        constexpr const char *ICON_MOON = "\xEF\x86\x86";
+        constexpr const char *ICON_CHECK = "\xEF\x80\x8C";
+        constexpr const char *ICON_SPINNER = "\xEF\x84\x90";
+        constexpr const char *ICON_TRIANGLE = "\xEF\x81\xB1";
+        constexpr const char *ICON_TIMES = "\xEF\x80\x8D";
+        constexpr const char *ICON_USER = "\xEF\x80\x87";
 
         constexpr float ANIMATION_DURATION = 2.0f;
         constexpr float DOT_ANIMATION_SPEED = 2.5f;
@@ -21,54 +21,69 @@ namespace BottomRightStatus {
         constexpr std::size_t MAX_VISIBLE_ACCOUNTS = 2;
 
         struct State {
-            std::string currentText;
-            std::string previousText;
-            Type currentType = Type::Idle;
-            Type previousType = Type::Idle;
+                std::string currentText;
+                std::string previousText;
+                Type currentType = Type::Idle;
+                Type previousType = Type::Idle;
 
-            float duration = 0.0f;
-            float elapsed = 0.0f;
+                float duration = 0.0f;
+                float elapsed = 0.0f;
 
-            float transitionProgress = 1.0f;
-            bool isTransitioning = false;
+                float transitionProgress = 1.0f;
+                bool isTransitioning = false;
         };
 
         std::mutex g_mutex;
         State g_state;
 
-        const char* GetIcon(Type type, bool hasSelectedAccounts) {
+        const char *GetIcon(Type type, bool hasSelectedAccounts) {
             switch (type) {
-                case Type::Idle:    return hasSelectedAccounts ? ICON_USER : ICON_MOON;
-                case Type::Loading: return ICON_SPINNER;
-                case Type::Success: return ICON_CHECK;
-                case Type::Warning: return ICON_TRIANGLE;
-                case Type::Error:   return ICON_TIMES;
-                default:            return ICON_MOON;
+                case Type::Idle:
+                    return hasSelectedAccounts ? ICON_USER : ICON_MOON;
+                case Type::Loading:
+                    return ICON_SPINNER;
+                case Type::Success:
+                    return ICON_CHECK;
+                case Type::Warning:
+                    return ICON_TRIANGLE;
+                case Type::Error:
+                    return ICON_TIMES;
+                default:
+                    return ICON_MOON;
             }
         }
 
         ImVec4 GetIconColor(Type type, bool hasSelectedAccounts) {
             switch (type) {
                 case Type::Idle:
-                    return hasSelectedAccounts
-                        ? ImVec4(0.5f, 0.7f, 0.9f, 1.0f)
-                        : ImVec4(0.5f, 0.5f, 0.6f, 1.0f);
-                case Type::Loading: return ImVec4(0.4f, 0.6f, 0.9f, 1.0f);
-                case Type::Success: return ImVec4(0.3f, 0.9f, 0.4f, 1.0f);
-                case Type::Warning: return ImVec4(0.9f, 0.7f, 0.2f, 1.0f);
-                case Type::Error:   return ImVec4(0.9f, 0.3f, 0.3f, 1.0f);
-                default:            return ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+                    return hasSelectedAccounts ? ImVec4(0.5f, 0.7f, 0.9f, 1.0f) : ImVec4(0.5f, 0.5f, 0.6f, 1.0f);
+                case Type::Loading:
+                    return ImVec4(0.4f, 0.6f, 0.9f, 1.0f);
+                case Type::Success:
+                    return ImVec4(0.3f, 0.9f, 0.4f, 1.0f);
+                case Type::Warning:
+                    return ImVec4(0.9f, 0.7f, 0.2f, 1.0f);
+                case Type::Error:
+                    return ImVec4(0.9f, 0.3f, 0.3f, 1.0f);
+                default:
+                    return ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
             }
         }
 
         ImVec4 GetTextColor(Type type) {
             switch (type) {
-                case Type::Idle:    return ImVec4(0.7f, 0.7f, 0.7f, 1.0f);
-                case Type::Loading: return ImVec4(0.8f, 0.8f, 0.8f, 1.0f);
-                case Type::Success: return ImVec4(0.8f, 1.0f, 0.8f, 1.0f);
-                case Type::Warning: return ImVec4(1.0f, 0.9f, 0.7f, 1.0f);
-                case Type::Error:   return ImVec4(1.0f, 0.8f, 0.8f, 1.0f);
-                default:            return ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+                case Type::Idle:
+                    return ImVec4(0.7f, 0.7f, 0.7f, 1.0f);
+                case Type::Loading:
+                    return ImVec4(0.8f, 0.8f, 0.8f, 1.0f);
+                case Type::Success:
+                    return ImVec4(0.8f, 1.0f, 0.8f, 1.0f);
+                case Type::Warning:
+                    return ImVec4(1.0f, 0.9f, 0.7f, 1.0f);
+                case Type::Error:
+                    return ImVec4(1.0f, 0.8f, 0.8f, 1.0f);
+                default:
+                    return ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
             }
         }
 
@@ -76,11 +91,16 @@ namespace BottomRightStatus {
         std::string GetAnimatedDots(float time) {
             const int dotCount = static_cast<int>(time * DOT_ANIMATION_SPEED) % 4;
             switch (dotCount) {
-                case 0: return "";
-                case 1: return ".";
-                case 2: return "..";
-                case 3: return "...";
-                default: return "";
+                case 0:
+                    return "";
+                case 1:
+                    return ".";
+                case 2:
+                    return "..";
+                case 3:
+                    return "...";
+                default:
+                    return "";
             }
         }
 
@@ -88,7 +108,7 @@ namespace BottomRightStatus {
             return 1.0f - std::pow(1.0f - t, 3.0f);
         }
 
-        void AddTextRotated(ImDrawList* drawList, const ImVec2& pos, ImU32 col, const char* text, float angle) {
+        void AddTextRotated(ImDrawList *drawList, const ImVec2 &pos, ImU32 col, const char *text, float angle) {
             const ImVec2 textSize = ImGui::CalcTextSize(text);
             const ImVec2 center(pos.x + textSize.x * 0.5f, pos.y + textSize.y * 0.5f);
 
@@ -102,7 +122,7 @@ namespace BottomRightStatus {
             const float sinA = std::sin(angle);
 
             for (int i = vtxStart; i < vtxEnd; ++i) {
-                ImVec2& vtx = drawList->VtxBuffer[i].pos;
+                ImVec2 &vtx = drawList->VtxBuffer[i].pos;
                 const float dx = vtx.x - center.x;
                 const float dy = vtx.y - center.y;
                 vtx.x = center.x + dx * cosA - dy * sinA;
@@ -110,7 +130,7 @@ namespace BottomRightStatus {
             }
         }
 
-        std::string BuildSelectedAccountsString(const std::vector<SelectedAccount>& selectedAccounts) {
+        std::string BuildSelectedAccountsString(const std::vector<SelectedAccount> &selectedAccounts) {
             if (selectedAccounts.empty()) {
                 return "Ready";
             }
@@ -134,9 +154,9 @@ namespace BottomRightStatus {
 
             return result;
         }
-    }
+    } // namespace
 
-    void AddText(const std::string& text, Type type, float duration) {
+    void AddText(const std::string &text, Type type, float duration) {
         std::lock_guard<std::mutex> lock(g_mutex);
 
         if (text == g_state.currentText && type == g_state.currentType) {
@@ -154,23 +174,23 @@ namespace BottomRightStatus {
         g_state.isTransitioning = true;
     }
 
-    void Loading(const std::string& text) {
+    void Loading(const std::string &text) {
         AddText(text, Type::Loading, 0.0f);
     }
 
-    void Success(const std::string& text, float duration) {
+    void Success(const std::string &text, float duration) {
         AddText(text, Type::Success, duration);
     }
 
-    void Info(const std::string& text, float duration) {
+    void Info(const std::string &text, float duration) {
         AddText(text, Type::Idle, duration);
     }
 
-    void Warning(const std::string& text, float duration) {
+    void Warning(const std::string &text, float duration) {
         AddText(text, Type::Warning, duration);
     }
 
-    void Error(const std::string& text, float duration) {
+    void Error(const std::string &text, float duration) {
         AddText(text, Type::Error, duration);
     }
 
@@ -191,8 +211,7 @@ namespace BottomRightStatus {
         g_state.isTransitioning = true;
     }
 
-    void Render(const ImGuiViewport* viewport, float deltaTime,
-                const std::vector<SelectedAccount>& selectedAccounts) {
+    void Render(const ImGuiViewport *viewport, float deltaTime, const std::vector<SelectedAccount> &selectedAccounts) {
         std::lock_guard<std::mutex> lock(g_mutex);
 
         const bool hasSelectedAccounts = !selectedAccounts.empty();
@@ -219,33 +238,27 @@ namespace BottomRightStatus {
             }
         }
 
-        const ImVec2 position(
-            viewport->WorkPos.x + viewport->WorkSize.x,
-            viewport->WorkPos.y + viewport->WorkSize.y
-        );
+        const ImVec2 position(viewport->WorkPos.x + viewport->WorkSize.x, viewport->WorkPos.y + viewport->WorkSize.y);
 
         ImGui::SetNextWindowPos(position, ImGuiCond_Always, ImVec2(1, 1));
 
-        constexpr ImGuiWindowFlags flags =
-            ImGuiWindowFlags_NoDecoration |
-            ImGuiWindowFlags_AlwaysAutoResize |
-            ImGuiWindowFlags_NoNav |
-            ImGuiWindowFlags_NoMove |
-            ImGuiWindowFlags_NoFocusOnAppearing;
+        constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize
+                                           | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove
+                                           | ImGuiWindowFlags_NoFocusOnAppearing;
 
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12, 8));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
 
         if (ImGui::Begin("##StatusBar", nullptr, flags)) {
-            ImDrawList* drawList = ImGui::GetWindowDrawList();
+            ImDrawList *drawList = ImGui::GetWindowDrawList();
             const float time = static_cast<float>(ImGui::GetTime());
             const float lineHeight = ImGui::GetTextLineHeight();
 
             const bool isIdle = g_state.currentType == Type::Idle && g_state.currentText.empty();
             const bool wasIdle = g_state.previousType == Type::Idle && g_state.previousText.empty();
 
-            const char* currentIcon = GetIcon(g_state.currentType, hasSelectedAccounts && isIdle);
-            const char* previousIcon = GetIcon(g_state.previousType, hasSelectedAccounts && wasIdle);
+            const char *currentIcon = GetIcon(g_state.currentType, hasSelectedAccounts && isIdle);
+            const char *previousIcon = GetIcon(g_state.previousType, hasSelectedAccounts && wasIdle);
 
             ImVec4 currentIconColor = GetIconColor(g_state.currentType, hasSelectedAccounts && isIdle);
             ImVec4 previousIconColor = GetIconColor(g_state.previousType, hasSelectedAccounts && wasIdle);
@@ -279,8 +292,13 @@ namespace BottomRightStatus {
 
                 // Spin previous icon if it was loading
                 if (g_state.previousType == Type::Loading) {
-                    AddTextRotated(drawList, prevIconPos, ImGui::ColorConvertFloat4ToU32(previousIconColor),
-                                   previousIcon, time * SPINNER_SPEED);
+                    AddTextRotated(
+                        drawList,
+                        prevIconPos,
+                        ImGui::ColorConvertFloat4ToU32(previousIconColor),
+                        previousIcon,
+                        time * SPINNER_SPEED
+                    );
                 } else {
                     drawList->AddText(prevIconPos, ImGui::ColorConvertFloat4ToU32(previousIconColor), previousIcon);
                 }
@@ -293,16 +311,26 @@ namespace BottomRightStatus {
 
                 // Spin current icon if loading
                 if (g_state.currentType == Type::Loading) {
-                    AddTextRotated(drawList, currIconPos, ImGui::ColorConvertFloat4ToU32(currentIconColor),
-                                   currentIcon, time * SPINNER_SPEED);
+                    AddTextRotated(
+                        drawList,
+                        currIconPos,
+                        ImGui::ColorConvertFloat4ToU32(currentIconColor),
+                        currentIcon,
+                        time * SPINNER_SPEED
+                    );
                 } else {
                     drawList->AddText(currIconPos, ImGui::ColorConvertFloat4ToU32(currentIconColor), currentIcon);
                 }
             } else {
                 // Static or spinning display
                 if (g_state.currentType == Type::Loading) {
-                    AddTextRotated(drawList, iconStartPos, ImGui::ColorConvertFloat4ToU32(currentIconColor),
-                                   currentIcon, time * SPINNER_SPEED);
+                    AddTextRotated(
+                        drawList,
+                        iconStartPos,
+                        ImGui::ColorConvertFloat4ToU32(currentIconColor),
+                        currentIcon,
+                        time * SPINNER_SPEED
+                    );
                 } else {
                     drawList->AddText(iconStartPos, ImGui::ColorConvertFloat4ToU32(currentIconColor), currentIcon);
                 }
@@ -342,11 +370,11 @@ namespace BottomRightStatus {
                 }
 
                 if (selectedAccounts.size() > MAX_VISIBLE_ACCOUNTS) {
-                    ImGui::TextUnformatted(std::format(" +{} more",
-                        selectedAccounts.size() - MAX_VISIBLE_ACCOUNTS).c_str());
+                    ImGui::TextUnformatted(
+                        std::format(" +{} more", selectedAccounts.size() - MAX_VISIBLE_ACCOUNTS).c_str()
+                    );
                 }
-            }
-            else if (isIdle && !g_state.isTransitioning) {
+            } else if (isIdle && !g_state.isTransitioning) {
                 ImVec4 textColor = GetTextColor(Type::Idle);
                 ImGui::PushStyleColor(ImGuiCol_Text, textColor);
                 ImGui::TextUnformatted("Ready");
@@ -418,4 +446,4 @@ namespace BottomRightStatus {
         ImGui::End();
         ImGui::PopStyleVar(2);
     }
-}
+} // namespace BottomRightStatus

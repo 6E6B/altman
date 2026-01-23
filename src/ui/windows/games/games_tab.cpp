@@ -1,31 +1,32 @@
+#include <algorithm>
+#include <format>
+#include <string>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
-#include <imgui.h>
-#include <vector>
-#include <string>
-#include <algorithm>
-#include <thread>
 #include <utility>
-#include <format>
+#include <vector>
 
-#include "ui/ui.h"
-#include "utils/account_utils.h"
-#include "utils/time_utils.h"
-#include "ui/windows/accounts/accounts_join_ui.h"
-#include "ui/windows/components.h"
-#include "ui/widgets/context_menus.h"
-#include "ui/windows/servers/servers_utils.h"
-#include "ui/widgets/bottom_right_status.h"
+#include <imgui.h>
+
 #include "games.h"
 #include "games_utils.h"
-#include "network/roblox/common.h"
 #include "network/roblox/auth.h"
+#include "network/roblox/common.h"
 #include "network/roblox/games.h"
 #include "network/roblox/session.h"
 #include "network/roblox/social.h"
 #include "system/roblox_launcher.h"
-#include "ui/widgets/modal_popup.h"
+#include "ui/ui.h"
 #include "ui/webview/webview.h"
+#include "ui/widgets/bottom_right_status.h"
+#include "ui/widgets/context_menus.h"
+#include "ui/widgets/modal_popup.h"
+#include "ui/windows/accounts/accounts_join_ui.h"
+#include "ui/windows/components.h"
+#include "ui/windows/servers/servers_utils.h"
+#include "utils/account_utils.h"
+#include "utils/time_utils.h"
 
 namespace {
     constexpr size_t SEARCH_BUFFER_SIZE = 64;
@@ -33,13 +34,13 @@ namespace {
     constexpr int INVALID_INDEX = -1;
     constexpr int FAVORITE_INDEX_OFFSET = -1000;
 
-    constexpr const char* ICON_OPEN_LINK = "\xEF\x8A\xBB ";
-    constexpr const char* ICON_JOIN = "\xEF\x8B\xB6 ";
-    constexpr const char* ICON_LAUNCH = "\xEF\x84\xB5 ";
-    constexpr const char* ICON_SERVER = "\xEF\x88\xB3 ";
+    constexpr const char *ICON_OPEN_LINK = "\xEF\x8A\xBB ";
+    constexpr const char *ICON_JOIN = "\xEF\x8B\xB6 ";
+    constexpr const char *ICON_LAUNCH = "\xEF\x84\xB5 ";
+    constexpr const char *ICON_SERVER = "\xEF\x88\xB3 ";
 
-    constexpr ImVec4 VERIFIED_COLOR{0.031f, 0.392f, 0.988f, 1.f};
-    constexpr ImVec4 ERROR_COLOR{1.f, 0.4f, 0.4f, 1.f};
+    constexpr ImVec4 VERIFIED_COLOR {0.031f, 0.392f, 0.988f, 1.f};
+    constexpr ImVec4 ERROR_COLOR {1.f, 0.4f, 0.4f, 1.f};
 
     char searchBuffer[SEARCH_BUFFER_SIZE] = "";
     char renameBuffer[RENAME_BUFFER_SIZE] = "";
@@ -66,12 +67,8 @@ namespace {
     GameSortMode currentSortMode = GameSortMode::Relevance;
     int sortComboIndex = 0;
 
-    template <typename Container, typename Pred>
-    void EraseIf(Container& container, Pred predicate) {
-        container.erase(
-            std::remove_if(container.begin(), container.end(), predicate),
-            container.end()
-        );
+    template<typename Container, typename Pred> void EraseIf(Container &container, Pred predicate) {
+        container.erase(std::remove_if(container.begin(), container.end(), predicate), container.end());
     }
 
     void SortGamesList() {
@@ -79,28 +76,24 @@ namespace {
 
         switch (currentSortMode) {
             case GameSortMode::PlayersDesc:
-                std::sort(gamesList.begin(), gamesList.end(),
-                    [](const GameInfo& a, const GameInfo& b) {
-                        return a.playerCount > b.playerCount;
-                    });
+                std::sort(gamesList.begin(), gamesList.end(), [](const GameInfo &a, const GameInfo &b) {
+                    return a.playerCount > b.playerCount;
+                });
                 break;
             case GameSortMode::PlayersAsc:
-                std::sort(gamesList.begin(), gamesList.end(),
-                    [](const GameInfo& a, const GameInfo& b) {
-                        return a.playerCount < b.playerCount;
-                    });
+                std::sort(gamesList.begin(), gamesList.end(), [](const GameInfo &a, const GameInfo &b) {
+                    return a.playerCount < b.playerCount;
+                });
                 break;
             case GameSortMode::NameAsc:
-                std::sort(gamesList.begin(), gamesList.end(),
-                    [](const GameInfo& a, const GameInfo& b) {
-                        return a.name < b.name;
-                    });
+                std::sort(gamesList.begin(), gamesList.end(), [](const GameInfo &a, const GameInfo &b) {
+                    return a.name < b.name;
+                });
                 break;
             case GameSortMode::NameDesc:
-                std::sort(gamesList.begin(), gamesList.end(),
-                    [](const GameInfo& a, const GameInfo& b) {
-                        return a.name > b.name;
-                    });
+                std::sort(gamesList.begin(), gamesList.end(), [](const GameInfo &a, const GameInfo &b) {
+                    return a.name > b.name;
+                });
                 break;
             case GameSortMode::Relevance:
             default:
@@ -124,7 +117,7 @@ namespace {
         selectedIndex = INVALID_INDEX;
         originalGamesList = Roblox::searchGames(searchBuffer);
 
-        EraseIf(originalGamesList, [](const GameInfo& game) {
+        EraseIf(originalGamesList, [](const GameInfo &game) {
             return favoriteGameIds.contains(game.universeId);
         });
 
@@ -133,20 +126,24 @@ namespace {
     }
 
     void LaunchGameWithAccounts(uint64_t placeId) {
-    	launchWithSelectedAccounts(LaunchParams::standard(placeId));
+        launchWithSelectedAccounts(LaunchParams::standard(placeId));
     }
 
     void RenderStandardGameMenu(uint64_t placeId, uint64_t universeId) {
-        StandardJoinMenuParams menu{};
+        StandardJoinMenuParams menu {};
         menu.placeId = placeId;
         menu.universeId = universeId;
         menu.jobId = "";
-        menu.onLaunchGame = [placeId]() { LaunchGameWithAccounts(placeId); };
-        menu.onFillGame = [placeId]() { FillJoinOptions(placeId, ""); };
+        menu.onLaunchGame = [placeId]() {
+            LaunchGameWithAccounts(placeId);
+        };
+        menu.onFillGame = [placeId]() {
+            FillJoinOptions(placeId, "");
+        };
         RenderStandardJoinMenu(menu);
     }
 
-    void RenderRenameMenu(const GameInfo& game, int index) {
+    void RenderRenameMenu(const GameInfo &game, int index) {
         if (!ImGui::BeginMenu("Rename")) {
             return;
         }
@@ -157,7 +154,7 @@ namespace {
             renamingUniverseId = game.universeId;
         }
 
-        const ImGuiStyle& style = ImGui::GetStyle();
+        const ImGuiStyle &style = ImGui::GetStyle();
         const float saveWidth = ImGui::CalcTextSize("Save##RenameFavorite").x + style.FramePadding.x * 2.0f;
         const float cancelWidth = ImGui::CalcTextSize("Cancel##RenameFavorite").x + style.FramePadding.x * 2.0f;
 
@@ -169,7 +166,7 @@ namespace {
             if (renamingUniverseId == game.universeId) {
                 favoriteGamesList[index].name = renameBuffer;
 
-                for (auto& favorite : g_favorites) {
+                for (auto &favorite: g_favorites) {
                     if (favorite.universeId == game.universeId) {
                         favorite.name = renameBuffer;
                         break;
@@ -195,7 +192,7 @@ namespace {
     void UnfavoriteGame(uint64_t universeId, int index) {
         favoriteGameIds.erase(universeId);
 
-        EraseIf(favoriteGamesList, [universeId](const GameInfo& game) {
+        EraseIf(favoriteGamesList, [universeId](const GameInfo &game) {
             return game.universeId == universeId;
         });
 
@@ -203,14 +200,14 @@ namespace {
             selectedIndex = INVALID_INDEX;
         }
 
-        EraseIf(g_favorites, [universeId](const FavoriteGame& favorite) {
+        EraseIf(g_favorites, [universeId](const FavoriteGame &favorite) {
             return favorite.universeId == universeId;
         });
 
         Data::SaveFavorites();
     }
 
-    void FavoriteGameFunc(const GameInfo& game) {
+    void FavoriteGameFunc(const GameInfo &game) {
         if (favoriteGameIds.contains(game.universeId)) {
             return;
         }
@@ -218,28 +215,23 @@ namespace {
         favoriteGameIds.insert(game.universeId);
         favoriteGamesList.insert(favoriteGamesList.begin(), game);
 
-        FavoriteGame favoriteData{game.name, game.universeId, game.placeId};
+        FavoriteGame favoriteData {game.name, game.universeId, game.placeId};
         g_favorites.push_back(favoriteData);
         Data::SaveFavorites();
     }
 
     void RenderGameSearch() {
-        const ImGuiStyle& style = ImGui::GetStyle();
+        const ImGuiStyle &style = ImGui::GetStyle();
 
-        constexpr const char* sortOptions[] = {
-            "Relevance",
-            "Players (Asc)",
-            "Players (Desc)",
-            "A-Z",
-            "Z-A"
-        };
+        constexpr const char *sortOptions[] = {"Relevance", "Players (Asc)", "Players (Desc)", "A-Z", "Z-A"};
 
         const float searchButtonWidth = ImGui::CalcTextSize(" \xEF\x80\x82  Search ").x + style.FramePadding.x * 2.0f;
         const float clearButtonWidth = ImGui::CalcTextSize(" \xEF\x87\xB8  Clear ").x + style.FramePadding.x * 2.0f;
         const float comboWidth = ImGui::CalcTextSize("Players (Low-High)").x + style.FramePadding.x * 4.0f;
         const float minFieldWidth = ImGui::GetFontSize() * 6.25f;
 
-        float inputWidth = ImGui::GetContentRegionAvail().x - searchButtonWidth - clearButtonWidth - comboWidth - style.ItemSpacing.x * 3;
+        float inputWidth = ImGui::GetContentRegionAvail().x - searchButtonWidth - clearButtonWidth - comboWidth
+                           - style.ItemSpacing.x * 3;
         inputWidth = std::max(inputWidth, minFieldWidth);
 
         ImGui::PushItemWidth(inputWidth);
@@ -270,7 +262,7 @@ namespace {
 
     void RenderFavoritesList(float listWidth, float availableHeight) {
         for (int index = 0; index < static_cast<int>(favoriteGamesList.size()); ++index) {
-            const auto& game = favoriteGamesList[index];
+            const auto &game = favoriteGamesList[index];
 
             if (searchBuffer[0] != '\0' && !containsCI(game.name, searchBuffer)) {
                 continue;
@@ -307,7 +299,7 @@ namespace {
 
     void RenderSearchResultsList(float listWidth, float availableHeight) {
         for (int index = 0; index < static_cast<int>(gamesList.size()); ++index) {
-            const auto& game = gamesList[index];
+            const auto &game = gamesList[index];
 
             if (favoriteGameIds.contains(game.universeId)) {
                 continue;
@@ -338,7 +330,7 @@ namespace {
         }
     }
 
-    void AddGameInfoRow(const char* label, const std::string& value, const ImVec4* color = nullptr) {
+    void AddGameInfoRow(const char *label, const std::string &value, const ImVec4 *color = nullptr) {
         constexpr float TEXT_INDENT = 8.0f;
 
         ImGui::TableNextRow();
@@ -377,28 +369,39 @@ namespace {
     }
 
     float CalculateLabelColumnWidth() {
-        const std::vector<const char*> labels = {
-            "Name:", "Place ID:", "Universe ID:", "Creator:", "Creator ID:",
-            "Creator Type:", "Players:", "Visits:", "Favorites:", "Max Players:",
-            "Price:", "Created:", "Updated:", "Genre:", "Est. Servers:"
-        };
+        const std::vector<const char *> labels
+            = {"Name:",
+               "Place ID:",
+               "Universe ID:",
+               "Creator:",
+               "Creator ID:",
+               "Creator Type:",
+               "Players:",
+               "Visits:",
+               "Favorites:",
+               "Max Players:",
+               "Price:",
+               "Created:",
+               "Updated:",
+               "Genre:",
+               "Est. Servers:"};
 
         float maxWidth = ImGui::GetFontSize() * 8.75f;
-        for (const char* label : labels) {
+        for (const char *label: labels) {
             maxWidth = std::max(maxWidth, ImGui::CalcTextSize(label).x);
         }
 
         return maxWidth + ImGui::GetFontSize() * 2.0f;
     }
 
-    void RenderGameInfoTable(const GameInfo& gameInfo, const Roblox::GameDetail& detailInfo) {
-        const int serverCount = detailInfo.maxPlayers > 0
-            ? static_cast<int>(std::ceil(static_cast<double>(gameInfo.playerCount) / detailInfo.maxPlayers))
-            : 0;
+    void RenderGameInfoTable(const GameInfo &gameInfo, const Roblox::GameDetail &detailInfo) {
+        const int serverCount
+            = detailInfo.maxPlayers > 0
+                  ? static_cast<int>(std::ceil(static_cast<double>(gameInfo.playerCount) / detailInfo.maxPlayers))
+                  : 0;
 
-        constexpr ImGuiTableFlags tableFlags = ImGuiTableFlags_BordersInnerH |
-                                              ImGuiTableFlags_RowBg |
-                                              ImGuiTableFlags_SizingFixedFit;
+        constexpr ImGuiTableFlags tableFlags
+            = ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit;
 
         ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(0.0f, 4.0f));
 
@@ -414,8 +417,8 @@ namespace {
             AddGameInfoRow("Universe ID:", std::format("{}", gameInfo.universeId));
 
             const std::string creatorText = detailInfo.creatorVerified
-                ? std::format("{} \xEF\x80\x8C", detailInfo.creatorName)
-                : detailInfo.creatorName;
+                                                ? std::format("{} \xEF\x80\x8C", detailInfo.creatorName)
+                                                : detailInfo.creatorName;
             AddGameInfoRow("Creator:", creatorText, detailInfo.creatorVerified ? &VERIFIED_COLOR : nullptr);
 
             AddGameInfoRow("Creator ID:", std::format("{}", detailInfo.creatorId));
@@ -427,9 +430,8 @@ namespace {
             AddGameInfoRow("Favorites:", formatWithCommas(detailInfo.favorites));
             AddGameInfoRow("Max Players:", formatWithCommas(detailInfo.maxPlayers));
 
-            const std::string priceText = detailInfo.priceRobux >= 0
-                ? std::format("{} R$", formatWithCommas(detailInfo.priceRobux))
-                : "0 R$";
+            const std::string priceText
+                = detailInfo.priceRobux >= 0 ? std::format("{} R$", formatWithCommas(detailInfo.priceRobux)) : "0 R$";
             AddGameInfoRow("Price:", priceText);
 
             AddGameInfoRow("Created:", formatAbsoluteWithRelativeFromIso(detailInfo.createdIso));
@@ -437,11 +439,15 @@ namespace {
 
             std::string genreCombined = detailInfo.genre;
             if (!detailInfo.genreL1.empty()) {
-                if (!genreCombined.empty()) genreCombined.append(", ");
+                if (!genreCombined.empty()) {
+                    genreCombined.append(", ");
+                }
                 genreCombined.append(detailInfo.genreL1);
             }
             if (!detailInfo.genreL2.empty()) {
-                if (!genreCombined.empty()) genreCombined.append(", ");
+                if (!genreCombined.empty()) {
+                    genreCombined.append(", ");
+                }
                 genreCombined.append(detailInfo.genreL2);
             }
             AddGameInfoRow("Genre:", genreCombined);
@@ -463,7 +469,7 @@ namespace {
             ImGui::Indent(TEXT_INDENT);
             ImGui::Spacing();
 
-            const ImGuiStyle& style = ImGui::GetStyle();
+            const ImGuiStyle &style = ImGui::GetStyle();
             const float reservedHeight = style.ItemSpacing.y + style.ItemSpacing.y + ImGui::GetFrameHeightWithSpacing();
             const float availableHeight = ImGui::GetContentRegionAvail().y;
             const float minHeight = ImGui::GetTextLineHeightWithSpacing() * 3.0f;
@@ -492,13 +498,13 @@ namespace {
         ImGui::PopStyleVar();
     }
 
-    void RenderGameButtons(const GameInfo& gameInfo) {
+    void RenderGameButtons(const GameInfo &gameInfo) {
         constexpr float BUTTON_INDENT = 4.0f;
 
         ImGui::Indent(BUTTON_INDENT);
 
         if (ImGui::Button(std::format("{}Launch Game", ICON_LAUNCH).c_str())) {
-        	launchWithSelectedAccounts(LaunchParams::standard(gameInfo.placeId));
+            launchWithSelectedAccounts(LaunchParams::standard(gameInfo.placeId));
         }
 
         ImGui::SameLine();
@@ -517,40 +523,46 @@ namespace {
 
         ImGui::OpenPopupOnItemClick("GamePageMenu");
 
-    	if (ImGui::BeginPopup("GamePageMenu")) {
-    		std::string primaryCookie;
-    		std::string primaryUserId;
+        if (ImGui::BeginPopup("GamePageMenu")) {
+            std::string primaryCookie;
+            std::string primaryUserId;
 
-    		if (!g_selectedAccountIds.empty()) {
-    			if (const AccountData* acc = getAccountById(*g_selectedAccountIds.begin())) {
-    				primaryCookie = acc->cookie;
-    				primaryUserId = acc->userId;
-    			}
-    		}
+            if (!g_selectedAccountIds.empty()) {
+                if (const AccountData *acc = getAccountById(*g_selectedAccountIds.begin())) {
+                    primaryCookie = acc->cookie;
+                    primaryUserId = acc->userId;
+                }
+            }
 
-    		if (ImGui::MenuItem("Roblox Page")) {
-    			LaunchWebviewImpl(
-					std::format("https://www.roblox.com/games/{}", gameInfo.placeId),
-					"Game Page", primaryCookie, primaryUserId
-				);
-    		}
+            if (ImGui::MenuItem("Roblox Page")) {
+                LaunchWebviewImpl(
+                    std::format("https://www.roblox.com/games/{}", gameInfo.placeId),
+                    "Game Page",
+                    primaryCookie,
+                    primaryUserId
+                );
+            }
 
-    		if (ImGui::MenuItem("Rolimons")) {
-    			LaunchWebviewImpl(
-					std::format("https://www.rolimons.com/game/{}/", gameInfo.placeId),
-					"Rolimons", primaryCookie, primaryUserId
-				);
-    		}
+            if (ImGui::MenuItem("Rolimons")) {
+                LaunchWebviewImpl(
+                    std::format("https://www.rolimons.com/game/{}/", gameInfo.placeId),
+                    "Rolimons",
+                    primaryCookie,
+                    primaryUserId
+                );
+            }
 
-    		if (ImGui::MenuItem("RoMonitor")) {
-    			LaunchWebviewImpl(
-					std::format("https://romonitorstats.com/experience/{}/", gameInfo.placeId),
-					"RoMonitor Stats", primaryCookie, primaryUserId
-				);
-    		}
+            if (ImGui::MenuItem("RoMonitor")) {
+                LaunchWebviewImpl(
+                    std::format("https://romonitorstats.com/experience/{}/", gameInfo.placeId),
+                    "RoMonitor Stats",
+                    primaryCookie,
+                    primaryUserId
+                );
+            }
 
-    		ImGui::EndPopup();
-    	}
+            ImGui::EndPopup();
+        }
 
         ImGui::Unindent(BUTTON_INDENT);
     }
@@ -560,7 +572,7 @@ namespace {
         ImGui::BeginChild("##GameDetails", ImVec2(panelWidth, availableHeight), true);
         ImGui::PopStyleVar();
 
-        const GameInfo* currentGameInfo = nullptr;
+        const GameInfo *currentGameInfo = nullptr;
         uint64_t currentUniverseId = 0;
 
         if (selectedIndex <= FAVORITE_INDEX_OFFSET) {
@@ -575,7 +587,7 @@ namespace {
         }
 
         if (currentGameInfo) {
-            const GameInfo& gameInfo = *currentGameInfo;
+            const GameInfo &gameInfo = *currentGameInfo;
 
             Roblox::GameDetail detailInfo;
             if (auto it = gameDetailCache.find(currentUniverseId); it != gameDetailCache.end()) {
@@ -606,10 +618,10 @@ namespace {
 
         Data::LoadFavorites();
 
-        for (const auto& favoriteData : g_favorites) {
+        for (const auto &favoriteData: g_favorites) {
             favoriteGameIds.insert(favoriteData.universeId);
 
-            GameInfo favoriteGameInfo{};
+            GameInfo favoriteGameInfo {};
             favoriteGameInfo.name = favoriteData.name;
             favoriteGameInfo.placeId = favoriteData.placeId;
             favoriteGameInfo.universeId = favoriteData.universeId;
@@ -626,12 +638,11 @@ namespace {
             return false;
         }
 
-        return std::any_of(gamesList.begin(), gamesList.end(),
-            [](const GameInfo& game) {
-                return !favoriteGameIds.contains(game.universeId);
-            });
+        return std::any_of(gamesList.begin(), gamesList.end(), [](const GameInfo &game) {
+            return !favoriteGameIds.contains(game.universeId);
+        });
     }
-}
+} // namespace
 
 void RenderGamesTab() {
     LoadFavoritesOnce();

@@ -4,20 +4,20 @@
 #include <imgui_internal.h>
 #include <nlohmann/json.hpp>
 
-#include <string>
-#include <vector>
-#include <unordered_map>
-#include <unordered_set>
 #include <algorithm>
-#include <cstring>
 #include <cctype>
 #include <cmath>
-#include <format>
+#include <cstring>
 #include <expected>
+#include <format>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
+#include "components/data.h"
 #include "ui/widgets/image.h"
 #include "utils/thread_task.h"
-#include "components/data.h"
 
 namespace {
     constexpr float THUMB_ROUNDING = 6.0f;
@@ -28,55 +28,59 @@ namespace {
     constexpr size_t SEARCH_BUFFER_SIZE = 64;
 
     struct InventoryItem {
-        uint64_t assetId{};
-        std::string assetName;
+            uint64_t assetId {};
+            std::string assetName;
     };
 
     struct CategoryInfo {
-        std::string displayName;
-        std::vector<std::pair<int, std::string>> assetTypes;
+            std::string displayName;
+            std::vector<std::pair<int, std::string>> assetTypes;
     };
 
     struct ThumbInfo {
-        TextureHandle texture;
-        int width{0};
-        int height{0};
-        bool loading{false};
-        bool failed{false};
-    	[[nodiscard]] bool hasTexture() const { return static_cast<bool>(texture); }
+            TextureHandle texture;
+            int width {0};
+            int height {0};
+            bool loading {false};
+            bool failed {false};
+            [[nodiscard]] bool hasTexture() const {
+                return static_cast<bool>(texture);
+            }
     };
 
     struct AvatarState {
-        TextureHandle texture;
-        int imageWidth{0};
-        int imageHeight{0};
-        bool loading{false};
-        bool failed{false};
-        bool started{false};
-        uint64_t loadedUserId{0};
-        [[nodiscard]] bool hasTexture() const { return static_cast<bool>(texture); }
+            TextureHandle texture;
+            int imageWidth {0};
+            int imageHeight {0};
+            bool loading {false};
+            bool failed {false};
+            bool started {false};
+            uint64_t loadedUserId {0};
+            [[nodiscard]] bool hasTexture() const {
+                return static_cast<bool>(texture);
+            }
     };
 
     struct CategoryState {
-        uint64_t userId{0};
-        bool loading{false};
-        bool failed{false};
-        std::vector<CategoryInfo> categories;
-        int selectedCategory{0};
+            uint64_t userId {0};
+            bool loading {false};
+            bool failed {false};
+            std::vector<CategoryInfo> categories;
+            int selectedCategory {0};
     };
 
     struct InventoryState {
-        std::unordered_map<int, std::vector<InventoryItem>> cachedInventories;
-        int selectedAssetTypeIndex{0};
-        bool loading{false};
-        bool failed{false};
+            std::unordered_map<int, std::vector<InventoryItem>> cachedInventories;
+            int selectedAssetTypeIndex {0};
+            bool loading {false};
+            bool failed {false};
     };
 
     struct EquippedState {
-        uint64_t userId{0};
-        bool loading{false};
-        bool failed{false};
-        std::vector<uint64_t> assetIds;
+            uint64_t userId {0};
+            bool loading {false};
+            bool failed {false};
+            std::vector<uint64_t> assetIds;
     };
 
     AvatarState g_avatarState;
@@ -85,8 +89,8 @@ namespace {
     EquippedState g_equippedState;
 
     std::unordered_map<uint64_t, ThumbInfo> g_thumbCache;
-    uint64_t g_selectedAssetId{0};
-    int g_activeThumbLoads{0};
+    uint64_t g_selectedAssetId {0};
+    int g_activeThumbLoads {0};
     char g_searchBuffer[SEARCH_BUFFER_SIZE] = "";
 
     void ClearTextureCache() {
@@ -98,20 +102,20 @@ namespace {
     }
 
     void ResetAllState() {
-        g_categoryState = CategoryState{};
-        g_inventoryState = InventoryState{};
-        g_equippedState = EquippedState{};
+        g_categoryState = CategoryState {};
+        g_inventoryState = InventoryState {};
+        g_equippedState = EquippedState {};
         g_searchBuffer[0] = '\0';
         ClearTextureCache();
     }
 
     [[nodiscard]]
-    std::expected<uint64_t, std::string> parseUserId(const std::string& str) {
+    std::expected<uint64_t, std::string> parseUserId(const std::string &str) {
         if (str.empty()) {
             return std::unexpected("Empty user ID");
         }
 
-        char* end = nullptr;
+        char *end = nullptr;
         const uint64_t result = std::strtoull(str.c_str(), &end, 10);
 
         if (end == str.c_str() || *end != '\0') {
@@ -127,7 +131,7 @@ namespace {
         std::string cookie;
 
         auto tryGetUserInfo = [&](int accountId) -> bool {
-            if (const AccountData* acc = getAccountById(accountId)) {
+            if (const AccountData *acc = getAccountById(accountId)) {
                 if (!acc->userId.empty()) {
                     auto result = parseUserId(acc->userId);
                     if (result) {
@@ -150,7 +154,7 @@ namespace {
     }
 
     [[nodiscard]]
-    std::expected<nlohmann::json, std::string> parseJsonSafe(const HttpClient::Response& resp) {
+    std::expected<nlohmann::json, std::string> parseJsonSafe(const HttpClient::Response &resp) {
         if (resp.status_code != 200 || resp.text.empty()) {
             return std::unexpected(std::format("HTTP error: {}", resp.status_code));
         }
@@ -184,11 +188,10 @@ namespace {
                 return;
             }
 
-            const auto& metaJson = *metaJsonResult;
+            const auto &metaJson = *metaJsonResult;
             std::string avatarUrl;
 
-            if (metaJson.contains("data") && !metaJson["data"].empty() &&
-                metaJson["data"][0].contains("imageUrl")) {
+            if (metaJson.contains("data") && !metaJson["data"].empty() && metaJson["data"][0].contains("imageUrl")) {
                 avatarUrl = metaJson["data"][0]["imageUrl"].get<std::string>();
             }
 
@@ -229,12 +232,14 @@ namespace {
         g_categoryState.loading = true;
 
         ThreadTask::fireAndForget([userId, cookie = std::move(cookie)] {
-            const std::string url = std::format(
-                "https://inventory.roblox.com/v1/users/{}/categories",
-                userId
-            );
+            const std::string url = std::format("https://inventory.roblox.com/v1/users/{}/categories", userId);
 
-            auto resp = HttpClient::get(url, {{"Cookie", std::format(".ROBLOSECURITY={}", cookie)}});
+            auto resp = HttpClient::get(
+                url,
+                {
+                    {"Cookie", std::format(".ROBLOSECURITY={}", cookie)}
+            }
+            );
             auto jsonResult = parseJsonSafe(resp);
 
             if (!jsonResult) {
@@ -245,16 +250,16 @@ namespace {
                 return;
             }
 
-            const auto& j = *jsonResult;
+            const auto &j = *jsonResult;
             std::vector<CategoryInfo> categories;
 
             if (j.contains("categories")) {
-                for (const auto& cat : j["categories"]) {
+                for (const auto &cat: j["categories"]) {
                     CategoryInfo ci;
                     ci.displayName = cat.value("displayName", "");
 
                     if (cat.contains("items")) {
-                        for (const auto& it : cat["items"]) {
+                        for (const auto &it: cat["items"]) {
                             const int id = it.value("id", 0);
                             const std::string name = it.value("displayName", "");
                             if (id != 0) {
@@ -282,10 +287,7 @@ namespace {
         g_equippedState.failed = false;
 
         ThreadTask::fireAndForget([userId] {
-            const std::string url = std::format(
-                "https://avatar.roblox.com/v1/users/{}/currently-wearing",
-                userId
-            );
+            const std::string url = std::format("https://avatar.roblox.com/v1/users/{}/currently-wearing", userId);
 
             auto resp = HttpClient::get(url);
             auto jsonResult = parseJsonSafe(resp);
@@ -299,11 +301,11 @@ namespace {
                 return;
             }
 
-            const auto& j = *jsonResult;
+            const auto &j = *jsonResult;
             std::vector<uint64_t> ids;
 
             if (j.contains("assetIds")) {
-                for (const auto& v : j["assetIds"]) {
+                for (const auto &v: j["assetIds"]) {
                     if (v.is_number_unsigned()) {
                         uint64_t id = v.get<uint64_t>();
                         if (id != 0) {
@@ -327,7 +329,7 @@ namespace {
     }
 
     void FetchThumbnail(uint64_t assetId) {
-        auto& thumb = g_thumbCache[assetId];
+        auto &thumb = g_thumbCache[assetId];
         thumb.loading = true;
         ++g_activeThumbLoads;
 
@@ -343,10 +345,8 @@ namespace {
                 });
             };
 
-            const std::string metaUrl = std::format(
-                "https://thumbnails.roblox.com/v1/assets?assetIds={}&size=75x75&format=Png",
-                assetId
-            );
+            const std::string metaUrl
+                = std::format("https://thumbnails.roblox.com/v1/assets?assetIds={}&size=75x75&format=Png", assetId);
 
             auto metaResp = HttpClient::get(metaUrl);
             auto metaJsonResult = parseJsonSafe(metaResp);
@@ -356,11 +356,11 @@ namespace {
                 return;
             }
 
-            const auto& metaJson = *metaJsonResult;
+            const auto &metaJson = *metaJsonResult;
             std::string imageUrl;
 
             if (metaJson.contains("data") && !metaJson["data"].empty()) {
-                const auto& d = metaJson["data"][0];
+                const auto &d = metaJson["data"][0];
                 if (d.contains("imageUrl")) {
                     imageUrl = d["imageUrl"].get<std::string>();
                 }
@@ -412,14 +412,20 @@ namespace {
             while (!anyError) {
                 std::string url = std::format(
                     "https://inventory.roblox.com/v2/users/{}/inventory/{}?limit=100&sortOrder=Asc",
-                    userId, assetTypeId
+                    userId,
+                    assetTypeId
                 );
 
                 if (!cursor.empty()) {
                     url.append(std::format("&cursor={}", cursor));
                 }
 
-                auto resp = HttpClient::get(url, {{"Cookie", std::format(".ROBLOSECURITY={}", cookie)}});
+                auto resp = HttpClient::get(
+                    url,
+                    {
+                        {"Cookie", std::format(".ROBLOSECURITY={}", cookie)}
+                }
+                );
                 auto jsonResult = parseJsonSafe(resp);
 
                 if (!jsonResult) {
@@ -427,12 +433,12 @@ namespace {
                     break;
                 }
 
-                const auto& j = *jsonResult;
+                const auto &j = *jsonResult;
 
                 if (j.contains("data")) {
-                    for (const auto& it : j["data"]) {
+                    for (const auto &it: j["data"]) {
                         InventoryItem ii;
-                        ii.assetId = it.value("assetId", uint64_t{0});
+                        ii.assetId = it.value("assetId", uint64_t {0});
                         ii.assetName = it.value("assetName", "");
                         items.push_back(std::move(ii));
                     }
@@ -465,13 +471,11 @@ namespace {
 
         if (g_avatarState.hasTexture() && !g_avatarState.loading) {
             const float desiredWidth = width - ImGui::GetStyle().ItemSpacing.x * 2;
-            const float desiredHeight = (g_avatarState.imageWidth > 0)
-                ? (desiredWidth * static_cast<float>(g_avatarState.imageHeight) / g_avatarState.imageWidth)
-                : 0.0f;
-            ImGui::Image(
-                ImTextureID(g_avatarState.texture.get()),
-                ImVec2(desiredWidth, desiredHeight)
-            );
+            const float desiredHeight
+                = (g_avatarState.imageWidth > 0)
+                      ? (desiredWidth * static_cast<float>(g_avatarState.imageHeight) / g_avatarState.imageWidth)
+                      : 0.0f;
+            ImGui::Image(ImTextureID(g_avatarState.texture.get()), ImVec2(desiredWidth, desiredHeight));
         } else if (g_avatarState.loading) {
             ImGui::TextUnformatted("Loading avatar...");
         } else if (g_avatarState.failed) {
@@ -492,19 +496,18 @@ namespace {
             int equipColumns = static_cast<int>(std::floor(equipAvailX / equipMinCell));
             equipColumns = std::max(equipColumns, 1);
 
-            const float equipCellSize = std::floor(
-                (equipAvailX - (equipColumns - 1) * ImGui::GetStyle().ItemSpacing.x) / equipColumns
-            );
+            const float equipCellSize
+                = std::floor((equipAvailX - (equipColumns - 1) * ImGui::GetStyle().ItemSpacing.x) / equipColumns);
 
             int index = 0;
-            for (uint64_t assetId : g_equippedState.assetIds) {
+            for (uint64_t assetId: g_equippedState.assetIds) {
                 if (index % equipColumns != 0) {
                     ImGui::SameLine();
                 }
 
-                auto& thumb = g_thumbCache[assetId];
-                if (!thumb.hasTexture() && !thumb.loading && !thumb.failed &&
-                    g_activeThumbLoads < MAX_CONCURRENT_THUMB_LOADS) {
+                auto &thumb = g_thumbCache[assetId];
+                if (!thumb.hasTexture() && !thumb.loading && !thumb.failed
+                    && g_activeThumbLoads < MAX_CONCURRENT_THUMB_LOADS) {
                     FetchThumbnail(assetId);
                 }
 
@@ -517,7 +520,8 @@ namespace {
                         "##eq",
                         ImTextureID(thumb.texture.get()),
                         ImVec2(equipCellSize, equipCellSize),
-                        ImVec2(0, 0), ImVec2(1, 1),
+                        ImVec2(0, 0),
+                        ImVec2(1, 1),
                         ImVec4(0, 0, 0, 0),
                         ImVec4(1, 1, 1, 1)
                     );
@@ -535,14 +539,17 @@ namespace {
     }
 
     [[nodiscard]]
-    float CalculateComboWidth(const char* text) {
-        const ImGuiStyle& style = ImGui::GetStyle();
+    float CalculateComboWidth(const char *text) {
+        const ImGuiStyle &style = ImGui::GetStyle();
         return ImGui::CalcTextSize(text).x + style.FramePadding.x * 2.0f + ImGui::GetFrameHeight();
     }
 
-    void RenderSearchAndFilters(int assetTypeId, const std::vector<const char*>& categoryNames,
-                                const std::vector<const char*>& assetTypeNames) {
-        const ImGuiStyle& style = ImGui::GetStyle();
+    void RenderSearchAndFilters(
+        int assetTypeId,
+        const std::vector<const char *> &categoryNames,
+        const std::vector<const char *> &assetTypeNames
+    ) {
+        const ImGuiStyle &style = ImGui::GetStyle();
 
         const float catComboWidth = CalculateComboWidth(categoryNames[g_categoryState.selectedCategory]);
         float assetComboWidth = 0.0f;
@@ -564,9 +571,7 @@ namespace {
             itemCount = static_cast<int>(it->second.size());
         }
 
-        const std::string searchHint = itemCount > 0
-            ? std::format("Search {} items", itemCount)
-            : "Search items";
+        const std::string searchHint = itemCount > 0 ? std::format("Search {} items", itemCount) : "Search items";
 
         ImGui::PushItemWidth(inputWidth);
         ImGui::InputTextWithHint("##inventory_search", searchHint.c_str(), g_searchBuffer, SEARCH_BUFFER_SIZE);
@@ -574,8 +579,12 @@ namespace {
 
         ImGui::SameLine(0, style.ItemSpacing.x);
         ImGui::PushItemWidth(catComboWidth);
-        if (ImGui::Combo("##categoryCombo", &g_categoryState.selectedCategory,
-                        categoryNames.data(), static_cast<int>(categoryNames.size()))) {
+        if (ImGui::Combo(
+                "##categoryCombo",
+                &g_categoryState.selectedCategory,
+                categoryNames.data(),
+                static_cast<int>(categoryNames.size())
+            )) {
             g_inventoryState.selectedAssetTypeIndex = 0;
             g_searchBuffer[0] = '\0';
         }
@@ -584,15 +593,19 @@ namespace {
         if (assetComboWidth > 0) {
             ImGui::SameLine(0, style.ItemSpacing.x);
             ImGui::PushItemWidth(assetComboWidth);
-            ImGui::Combo("##assetTypeCombo", &g_inventoryState.selectedAssetTypeIndex,
-                        assetTypeNames.data(), static_cast<int>(assetTypeNames.size()));
+            ImGui::Combo(
+                "##assetTypeCombo",
+                &g_inventoryState.selectedAssetTypeIndex,
+                assetTypeNames.data(),
+                static_cast<int>(assetTypeNames.size())
+            );
             ImGui::PopItemWidth();
         }
 
         ImGui::Separator();
     }
 
-    void RenderInventoryGrid(const std::vector<InventoryItem>& items, float cellSize, int columns) {
+    void RenderInventoryGrid(const std::vector<InventoryItem> &items, float cellSize, int columns) {
         std::string filterLower;
         {
             std::string sb = g_searchBuffer;
@@ -646,15 +659,15 @@ namespace {
                     }
 
                     const int itemIndex = visibleIndices[listIdx];
-                    const auto& item = items[itemIndex];
+                    const auto &item = items[itemIndex];
 
                     if (col > 0) {
                         ImGui::SameLine();
                     }
 
-                    auto& thumb = g_thumbCache[item.assetId];
-                    if (!thumb.hasTexture() && !thumb.loading && !thumb.failed &&
-                        g_activeThumbLoads < MAX_CONCURRENT_THUMB_LOADS) {
+                    auto &thumb = g_thumbCache[item.assetId];
+                    if (!thumb.hasTexture() && !thumb.loading && !thumb.failed
+                        && g_activeThumbLoads < MAX_CONCURRENT_THUMB_LOADS) {
                         FetchThumbnail(item.assetId);
                     }
 
@@ -665,15 +678,12 @@ namespace {
 
                     if (thumb.hasTexture()) {
                         const ImVec4 tint = isSelected ? ImVec4(1, 1, 1, 1) : ImVec4(1, 1, 1, 1);
-                        const ImVec4 btnCol = isEquipped
-                            ? ImGui::GetStyleColorVec4(ImGuiCol_Button)
-                            : ImVec4(0, 0, 0, 0);
-                        const ImVec4 btnColHovered = isEquipped
-                            ? ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered)
-                            : ImVec4(0, 0, 0, 0);
-                        const ImVec4 btnColActive = isEquipped
-                            ? ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
-                            : ImVec4(0, 0, 0, 0);
+                        const ImVec4 btnCol
+                            = isEquipped ? ImGui::GetStyleColorVec4(ImGuiCol_Button) : ImVec4(0, 0, 0, 0);
+                        const ImVec4 btnColHovered
+                            = isEquipped ? ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered) : ImVec4(0, 0, 0, 0);
+                        const ImVec4 btnColActive
+                            = isEquipped ? ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive) : ImVec4(0, 0, 0, 0);
 
                         ImGui::PushStyleColor(ImGuiCol_Button, btnCol);
                         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, btnColHovered);
@@ -685,7 +695,8 @@ namespace {
                             "##img",
                             ImTextureID(thumb.texture.get()),
                             ImVec2(cellSize, cellSize),
-                            ImVec2(0, 0), ImVec2(1, 1),
+                            ImVec2(0, 0),
+                            ImVec2(1, 1),
                             ImVec4(0, 0, 0, 0),
                             tint
                         );
@@ -698,9 +709,7 @@ namespace {
                         }
                     } else {
                         ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, THUMB_ROUNDING);
-                        ImVec4 btnCol = isEquipped
-                            ? ImGui::GetStyleColorVec4(ImGuiCol_Button)
-                            : ImVec4(0, 0, 0, 0);
+                        ImVec4 btnCol = isEquipped ? ImGui::GetStyleColorVec4(ImGuiCol_Button) : ImVec4(0, 0, 0, 0);
                         if (!isSelected) {
                             btnCol.w *= 0.7f;
                         }
@@ -718,9 +727,8 @@ namespace {
 
                     const ImVec2 rectMin = ImGui::GetItemRectMin();
                     const ImVec2 rectMax = ImGui::GetItemRectMax();
-                    const ImU32 outlineColor = isSelected
-                        ? ImGui::GetColorU32(ImGuiCol_ButtonActive)
-                        : ImGui::GetColorU32(ImGuiCol_Border);
+                    const ImU32 outlineColor
+                        = isSelected ? ImGui::GetColorU32(ImGuiCol_ButtonActive) : ImGui::GetColorU32(ImGuiCol_Border);
                     ImGui::GetWindowDrawList()->AddRect(rectMin, rectMax, outlineColor, THUMB_ROUNDING, 0, 1.0f);
 
                     ImGui::PopID();
@@ -750,8 +758,8 @@ namespace {
             return;
         }
 
-        std::vector<const char*> categoryNames;
-        for (const auto& ci : g_categoryState.categories) {
+        std::vector<const char *> categoryNames;
+        for (const auto &ci: g_categoryState.categories) {
             categoryNames.push_back(ci.displayName.c_str());
         }
 
@@ -759,8 +767,8 @@ namespace {
             g_categoryState.selectedCategory = 0;
         }
 
-        std::vector<const char*> assetTypeNames;
-        for (const auto& p : g_categoryState.categories[g_categoryState.selectedCategory].assetTypes) {
+        std::vector<const char *> assetTypeNames;
+        for (const auto &p: g_categoryState.categories[g_categoryState.selectedCategory].assetTypes) {
             assetTypeNames.push_back(p.second.c_str());
         }
 
@@ -769,7 +777,8 @@ namespace {
         }
 
         const int assetTypeId = g_categoryState.categories[g_categoryState.selectedCategory]
-            .assetTypes[g_inventoryState.selectedAssetTypeIndex].first;
+                                    .assetTypes[g_inventoryState.selectedAssetTypeIndex]
+                                    .first;
 
         RenderSearchAndFilters(assetTypeId, categoryNames, assetTypeNames);
 
@@ -783,23 +792,21 @@ namespace {
         } else if (g_inventoryState.failed) {
             ImGui::TextUnformatted("Failed to load items.");
         } else if (itInv != g_inventoryState.cachedInventories.end()) {
-            const auto& invItems = itInv->second;
+            const auto &invItems = itInv->second;
             const float minCellSize = ImGui::GetFontSize() * MIN_CELL_SIZE_MULTIPLIER;
             const float availX = ImGui::GetContentRegionAvail().x;
 
             int columns = static_cast<int>(std::floor(availX / minCellSize));
             columns = std::max(columns, 1);
 
-            const float cellSize = std::floor(
-                (availX - (columns - 1) * ImGui::GetStyle().ItemSpacing.x) / columns
-            );
+            const float cellSize = std::floor((availX - (columns - 1) * ImGui::GetStyle().ItemSpacing.x) / columns);
 
             RenderInventoryGrid(invItems, cellSize, columns);
         }
 
         ImGui::EndChild();
     }
-}
+} // namespace
 
 void RenderInventoryTab() {
     auto [currentUserId, currentCookie] = GetCurrentUserInfo();
@@ -826,8 +833,8 @@ void RenderInventoryTab() {
         FetchAvatarImage(currentUserId);
     }
 
-    if (g_categoryState.userId != 0 && !g_categoryState.loading &&
-        g_categoryState.categories.empty() && !g_categoryState.failed) {
+    if (g_categoryState.userId != 0 && !g_categoryState.loading && g_categoryState.categories.empty()
+        && !g_categoryState.failed) {
         FetchCategories(currentUserId, currentCookie);
     }
 

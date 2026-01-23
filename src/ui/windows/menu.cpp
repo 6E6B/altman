@@ -1,45 +1,46 @@
 #include <algorithm>
-#include <imgui.h>
 #include <array>
-#include <string>
-#include <vector>
 #include <filesystem>
 #include <format>
 #include <print>
+#include <string>
+#include <vector>
+
+#include <imgui.h>
 
 #ifdef _WIN32
-    #include <windows.h>
-    #include <tlhelp32.h>
-    #include <shlobj.h>
+#include <windows.h>
+#include <shlobj.h>
+#include <tlhelp32.h>
 #endif
 
-#include "ui/windows/backup/backup.h"
 #include "components.h"
 #include "console/console.h"
-#include "ui/widgets/bottom_right_status.h"
 #include "data.h"
-#include "network/roblox/common.h"
 #include "network/roblox/auth.h"
+#include "network/roblox/common.h"
 #include "network/roblox/games.h"
 #include "network/roblox/session.h"
 #include "network/roblox/social.h"
 #include "system/multi_instance.h"
 #include "system/roblox_control.h"
-#include "utils/thread_task.h"
-#include "utils/paths.h"
-#include "ui/widgets/modal_popup.h"
 #include "ui/webview/webview.h"
+#include "ui/widgets/bottom_right_status.h"
+#include "ui/widgets/modal_popup.h"
+#include "ui/windows/backup/backup.h"
+#include "utils/paths.h"
+#include "utils/thread_task.h"
 
 struct DuplicateAccountModalState {
-    bool showModal = false;
-    std::string pendingCookie;
-    std::string pendingUsername;
-    std::string pendingDisplayName;
-    std::string pendingPresence;
-    std::string pendingUserId;
-    Roblox::VoiceSettings pendingVoiceStatus;
-    int existingId = -1;
-    int nextId = -1;
+        bool showModal = false;
+        std::string pendingCookie;
+        std::string pendingUsername;
+        std::string pendingDisplayName;
+        std::string pendingPresence;
+        std::string pendingUserId;
+        Roblox::VoiceSettings pendingVoiceStatus;
+        int existingId = -1;
+        int nextId = -1;
 };
 
 static DuplicateAccountModalState g_duplicateAccountModal;
@@ -48,7 +49,7 @@ namespace {
     constexpr size_t COOKIE_BUFFER_SIZE = 2048;
     constexpr size_t PASSWORD_BUFFER_SIZE = 128;
 
-    std::string TrimWhitespace(const std::string& str) {
+    std::string TrimWhitespace(const std::string &str) {
         const auto start = str.find_first_not_of(" \t\r\n");
         if (start == std::string::npos) {
             return "";
@@ -59,7 +60,7 @@ namespace {
 
     int GetMaxAccountId() {
         int maxId = 0;
-        for (const auto& acct : g_accounts) {
+        for (const auto &acct: g_accounts) {
             if (acct.id > maxId) {
                 maxId = acct.id;
             }
@@ -71,7 +72,7 @@ namespace {
         ThreadTask::fireAndForget([] {
             LOG_INFO("Refreshing account statuses...");
 
-            for (auto& acct : g_accounts) {
+            for (auto &acct: g_accounts) {
                 const auto banStatus = Roblox::refreshBanStatus(acct.cookie);
 
                 if (banStatus == Roblox::BanCheckResult::Banned) {
@@ -126,12 +127,12 @@ namespace {
     }
 
     void ShowDuplicateAccountPrompt(
-        const std::string& cookie,
-        const std::string& username,
-        const std::string& displayName,
-        const std::string& presence,
-        const std::string& userId,
-        const Roblox::VoiceSettings& voiceSettings,
+        const std::string &cookie,
+        const std::string &username,
+        const std::string &displayName,
+        const std::string &presence,
+        const std::string &userId,
+        const Roblox::VoiceSettings &voiceSettings,
         int existingId,
         int nextId
     ) {
@@ -148,12 +149,12 @@ namespace {
 
     void CreateNewAccount(
         int id,
-        const std::string& cookie,
-        const std::string& userId,
-        const std::string& username,
-        const std::string& displayName,
-        const std::string& presence,
-        const Roblox::VoiceSettings& voiceSettings
+        const std::string &cookie,
+        const std::string &userId,
+        const std::string &username,
+        const std::string &displayName,
+        const std::string &presence,
+        const Roblox::VoiceSettings &voiceSettings
     ) {
         AccountData newAcct;
         newAcct.id = id;
@@ -168,13 +169,13 @@ namespace {
         newAcct.isFavorite = false;
 
         g_accounts.push_back(std::move(newAcct));
-    	invalidateAccountIndex();
+        invalidateAccountIndex();
 
         LOG_INFO("Added new account {} - {}", id, displayName);
         Data::SaveAccounts();
     }
 
-    bool ValidateAndAddCookie(const std::string& cookie) {
+    bool ValidateAndAddCookie(const std::string &cookie) {
         const std::string trimmedCookie = TrimWhitespace(cookie);
 
         if (trimmedCookie.empty()) {
@@ -202,11 +203,10 @@ namespace {
         const std::string presence = Roblox::getPresence(trimmedCookie, uid);
         const auto voiceSettings = Roblox::getVoiceChatStatus(trimmedCookie);
 
-        const auto existingAccount = std::find_if(
-            g_accounts.begin(),
-            g_accounts.end(),
-            [&userIdStr](const AccountData& a) { return a.userId == userIdStr; }
-        );
+        const auto existingAccount
+            = std::find_if(g_accounts.begin(), g_accounts.end(), [&userIdStr](const AccountData &a) {
+                  return a.userId == userIdStr;
+              });
 
         if (existingAccount != g_accounts.end()) {
             ShowDuplicateAccountPrompt(
@@ -220,20 +220,12 @@ namespace {
                 nextId
             );
         } else {
-            CreateNewAccount(
-                nextId,
-                trimmedCookie,
-                userIdStr,
-                username,
-                displayName,
-                presence,
-                voiceSettings
-            );
+            CreateNewAccount(nextId, trimmedCookie, userIdStr, username, displayName, presence, voiceSettings);
         }
 
         return true;
     }
-}
+} // namespace
 
 bool RenderMainMenu() {
     static std::array<char, COOKIE_BUFFER_SIZE> s_cookieInputBuffer = {};
@@ -292,14 +284,17 @@ bool RenderMainMenu() {
                 ImGui::EndMenu();
             }
 
-        	if (ImGui::MenuItem("Add via Login")) {
-        		LaunchWebviewForLogin("https://www.roblox.com/login", "Login to Roblox",
-					[](const std::string& extractedCookie) {
-						if (!extractedCookie.empty()) {
-							ValidateAndAddCookie(extractedCookie);
-						}
-					});
-        	}
+            if (ImGui::MenuItem("Add via Login")) {
+                LaunchWebviewForLogin(
+                    "https://www.roblox.com/login",
+                    "Login to Roblox",
+                    [](const std::string &extractedCookie) {
+                        if (!extractedCookie.empty()) {
+                            ValidateAndAddCookie(extractedCookie);
+                        }
+                    }
+                );
+            }
 
             ImGui::EndMenu();
         }
@@ -310,13 +305,10 @@ bool RenderMainMenu() {
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.f, 0.4f, 0.4f, 1.f));
             if (ImGui::MenuItem(deleteText.c_str())) {
                 ModalPopup::AddYesNo("Delete selected accounts?", []() {
-                    std::erase_if(
-                        g_accounts,
-                        [](const AccountData& acct) {
-                            return g_selectedAccountIds.count(acct.id);
-                        }
-                    );
-                	invalidateAccountIndex();
+                    std::erase_if(g_accounts, [](const AccountData &acct) {
+                        return g_selectedAccountIds.count(acct.id);
+                    });
+                    invalidateAccountIndex();
                     g_selectedAccountIds.clear();
                     Data::SaveAccounts();
                     LOG_INFO("Deleted selected accounts.");
@@ -386,12 +378,12 @@ bool RenderMainMenu() {
 
         if (ImGui::Button("Export")) {
             if (std::strcmp(s_password1, s_password2) == 0 && s_password1[0] != '\0') {
-            	auto result = Backup::Export(s_password1);
-            	if (result) {
-            		ModalPopup::AddInfo("Backup saved.");
-            	} else {
-            		ModalPopup::AddInfo(Backup::errorToString(result.error()).data());
-            	}
+                auto result = Backup::Export(s_password1);
+                if (result) {
+                    ModalPopup::AddInfo("Backup saved.");
+                } else {
+                    ModalPopup::AddInfo(Backup::errorToString(result.error()).data());
+                }
                 s_password1[0] = s_password2[0] = '\0';
                 ImGui::CloseCurrentPopup();
             } else {
@@ -414,22 +406,25 @@ bool RenderMainMenu() {
     if (ImGui::BeginPopupModal("ImportBackup", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         if (s_refreshBackupList) {
             s_backupFiles.clear();
-        	const auto dir = AltMan::Paths::Backups();
+            const auto dir = AltMan::Paths::Backups();
 
-            for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+            for (const auto &entry: std::filesystem::directory_iterator(dir)) {
 
-            	if (!entry.is_regular_file())
-            		continue;
+                if (!entry.is_regular_file()) {
+                    continue;
+                }
 
-            	const auto& path = entry.path();
+                const auto &path = entry.path();
 
-            	if (path.filename() == ".DS_Store")
-            		continue;
+                if (path.filename() == ".DS_Store") {
+                    continue;
+                }
 
-            	if (path.extension() != ".dat")
-            		continue;
+                if (path.extension() != ".dat") {
+                    continue;
+                }
 
-            	s_backupFiles.push_back(entry.path().filename().string());
+                s_backupFiles.push_back(entry.path().filename().string());
             }
             std::sort(s_backupFiles.begin(), s_backupFiles.end());
             s_selectedBackup = 0;
@@ -439,7 +434,7 @@ bool RenderMainMenu() {
         if (s_backupFiles.empty()) {
             ImGui::TextUnformatted("No backups found.");
         } else {
-            const char* current = s_backupFiles[s_selectedBackup].c_str();
+            const char *current = s_backupFiles[s_selectedBackup].c_str();
             if (ImGui::BeginCombo("File", current)) {
                 for (int i = 0; i < static_cast<int>(s_backupFiles.size()); ++i) {
                     const bool selected = (i == s_selectedBackup);
@@ -460,22 +455,22 @@ bool RenderMainMenu() {
 
         if (ImGui::Button("Import")) {
 
-        	if (!s_backupFiles.empty()) {
-        		const auto dir = AltMan::Paths::Backups() / s_backupFiles[s_selectedBackup];
+            if (!s_backupFiles.empty()) {
+                const auto dir = AltMan::Paths::Backups() / s_backupFiles[s_selectedBackup];
 
-        		auto result = Backup::Import(dir.string(), s_importPassword);
+                auto result = Backup::Import(dir.string(), s_importPassword);
 
-        		if (result) {
-        			ModalPopup::AddInfo("Import completed.");
-        		} else {
-        			ModalPopup::AddInfo(Backup::errorToString(result.error()).data());
-        		}
-        	} else {
-        		ModalPopup::AddInfo("No backup selected.");
-        	}
+                if (result) {
+                    ModalPopup::AddInfo("Import completed.");
+                } else {
+                    ModalPopup::AddInfo(Backup::errorToString(result.error()).data());
+                }
+            } else {
+                ModalPopup::AddInfo("No backup selected.");
+            }
 
-        	s_importPassword[0] = '\0';
-        	ImGui::CloseCurrentPopup();
+            s_importPassword[0] = '\0';
+            ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
         if (ImGui::Button("Cancel")) {
@@ -490,13 +485,9 @@ bool RenderMainMenu() {
     }
 
     if (ImGui::BeginPopupModal("DuplicateAccountPrompt", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        const auto existingAccount = std::find_if(
-            g_accounts.begin(),
-            g_accounts.end(),
-            [](const AccountData& a) {
-                return a.id == g_duplicateAccountModal.existingId;
-            }
-        );
+        const auto existingAccount = std::find_if(g_accounts.begin(), g_accounts.end(), [](const AccountData &a) {
+            return a.id == g_duplicateAccountModal.existingId;
+        });
 
         if (existingAccount != g_accounts.end()) {
             const std::string message = std::format(
@@ -510,25 +501,24 @@ bool RenderMainMenu() {
 
         ImGui::Spacing();
 
-    	if (ImGui::Button("Update", ImVec2(100, 0))) {
-    		if (AccountData* acc = getAccountById(g_duplicateAccountModal.existingId)) {
-    			acc->cookie = g_duplicateAccountModal.pendingCookie;
-    			acc->username = g_duplicateAccountModal.pendingUsername;
-    			acc->displayName = g_duplicateAccountModal.pendingDisplayName;
-    			acc->status = g_duplicateAccountModal.pendingPresence;
-    			acc->voiceStatus = g_duplicateAccountModal.pendingVoiceStatus.status;
-    			acc->voiceBanExpiry = g_duplicateAccountModal.pendingVoiceStatus.bannedUntil;
+        if (ImGui::Button("Update", ImVec2(100, 0))) {
+            if (AccountData *acc = getAccountById(g_duplicateAccountModal.existingId)) {
+                acc->cookie = g_duplicateAccountModal.pendingCookie;
+                acc->username = g_duplicateAccountModal.pendingUsername;
+                acc->displayName = g_duplicateAccountModal.pendingDisplayName;
+                acc->status = g_duplicateAccountModal.pendingPresence;
+                acc->voiceStatus = g_duplicateAccountModal.pendingVoiceStatus.status;
+                acc->voiceBanExpiry = g_duplicateAccountModal.pendingVoiceStatus.bannedUntil;
 
-    			LOG_INFO("Updated existing account {} - {}", acc->id, acc->displayName);
-    			Data::SaveAccounts();
-    		}
-    		ImGui::CloseCurrentPopup();
-    	}
+                LOG_INFO("Updated existing account {} - {}", acc->id, acc->displayName);
+                Data::SaveAccounts();
+            }
+            ImGui::CloseCurrentPopup();
+        }
 
         ImGui::SameLine();
         if (ImGui::Button("Discard", ImVec2(100, 0))) {
-            LOG_INFO("Discarded new cookie for existing account {}",
-                g_duplicateAccountModal.existingId);
+            LOG_INFO("Discarded new cookie for existing account {}", g_duplicateAccountModal.existingId);
             ImGui::CloseCurrentPopup();
         }
 
@@ -544,9 +534,11 @@ bool RenderMainMenu() {
                 g_duplicateAccountModal.pendingVoiceStatus
             );
 
-            LOG_INFO("Force added new account {} - {}",
+            LOG_INFO(
+                "Force added new account {} - {}",
                 g_duplicateAccountModal.nextId,
-                g_duplicateAccountModal.pendingDisplayName);
+                g_duplicateAccountModal.pendingDisplayName
+            );
             ImGui::CloseCurrentPopup();
         }
 

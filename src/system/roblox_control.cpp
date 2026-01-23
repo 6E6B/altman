@@ -1,44 +1,64 @@
 #include "roblox_control.h"
 
-#include <string>
 #include <format>
+#include <string>
+
 #include "console/console.h"
 
 #ifdef _WIN32
-    #include <windows.h>
-    #include <tlhelp32.h>
-    #include <shlobj.h>
-    #include <cstring>
+#include <cstring>
+
+#include <windows.h>
+#include <shlobj.h>
+#include <tlhelp32.h>
 #elif __APPLE__
-    #include <unistd.h>
-    #include <signal.h>
-    #include <sys/sysctl.h>
-    #include <libproc.h>
-    #include <filesystem>
-    #include <fstream>
-    #include <vector>
+#include <filesystem>
+#include <fstream>
+#include <vector>
+
+#include <libproc.h>
+#include <signal.h>
+#include <sys/sysctl.h>
+#include <unistd.h>
 #endif
 
 namespace RobloxControl {
 
 #ifdef _WIN32
     namespace {
-    	std::string WStringToString(std::wstring_view wstr) {
-    		if (wstr.empty()) return {};
-    		int size_needed = WideCharToMultiByte(CP_UTF8, 0, wstr.data(),
-				static_cast<int>(wstr.size()), nullptr, 0, nullptr, nullptr);
-    		std::string result(size_needed, '\0');
-    		WideCharToMultiByte(CP_UTF8, 0, wstr.data(),
-				static_cast<int>(wstr.size()), result.data(), size_needed, nullptr, nullptr);
-    		return result;
-    	}
+        std::string WStringToString(std::wstring_view wstr) {
+            if (wstr.empty()) {
+                return {};
+            }
+            int size_needed = WideCharToMultiByte(
+                CP_UTF8,
+                0,
+                wstr.data(),
+                static_cast<int>(wstr.size()),
+                nullptr,
+                0,
+                nullptr,
+                nullptr
+            );
+            std::string result(size_needed, '\0');
+            WideCharToMultiByte(
+                CP_UTF8,
+                0,
+                wstr.data(),
+                static_cast<int>(wstr.size()),
+                result.data(),
+                size_needed,
+                nullptr,
+                nullptr
+            );
+            return result;
+        }
 
-        bool DeleteFileWithRetry(const std::wstring& path,
-                                int attempts = 50,
-                                int delayMs = 100) {
+        bool DeleteFileWithRetry(const std::wstring &path, int attempts = 50, int delayMs = 100) {
             for (int i = 0; i < attempts; ++i) {
-                if (DeleteFileW(path.c_str()))
+                if (DeleteFileW(path.c_str())) {
                     return true;
+                }
                 DWORD err = GetLastError();
                 if (err != ERROR_SHARING_VIOLATION && err != ERROR_ACCESS_DENIED) {
                     LOG_ERROR("Failed to delete file: {} (Error: {})", WStringToString(path), err);
@@ -50,12 +70,11 @@ namespace RobloxControl {
             return false;
         }
 
-        bool RemoveDirectoryWithRetry(const std::wstring& path,
-                                     int attempts = 50,
-                                     int delayMs = 100) {
+        bool RemoveDirectoryWithRetry(const std::wstring &path, int attempts = 50, int delayMs = 100) {
             for (int i = 0; i < attempts; ++i) {
-                if (RemoveDirectoryW(path.c_str()))
+                if (RemoveDirectoryW(path.c_str())) {
                     return true;
+                }
                 DWORD err = GetLastError();
                 if (err != ERROR_SHARING_VIOLATION && err != ERROR_ACCESS_DENIED) {
                     LOG_ERROR("Failed to remove directory: {} (Error: {})", WStringToString(path), err);
@@ -67,7 +86,7 @@ namespace RobloxControl {
             return false;
         }
 
-        void ClearDirectoryContents(const std::wstring& directoryPath) {
+        void ClearDirectoryContents(const std::wstring &directoryPath) {
             std::wstring searchPath = directoryPath + L"\\*";
             WIN32_FIND_DATAW findFileData;
             HANDLE hFind = FindFirstFileW(searchPath.c_str(), &findFileData);
@@ -75,9 +94,16 @@ namespace RobloxControl {
             if (hFind == INVALID_HANDLE_VALUE) {
                 DWORD error = GetLastError();
                 if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
-                    LOG_INFO("ClearDirectoryContents: Directory to clear not found or is empty: {}", WStringToString(directoryPath));
+                    LOG_INFO(
+                        "ClearDirectoryContents: Directory to clear not found or is empty: {}",
+                        WStringToString(directoryPath)
+                    );
                 } else {
-                    LOG_ERROR("ClearDirectoryContents: Failed to find first file in directory: {} (Error: {})", WStringToString(directoryPath), error);
+                    LOG_ERROR(
+                        "ClearDirectoryContents: Failed to find first file in directory: {} (Error: {})",
+                        WStringToString(directoryPath),
+                        error
+                    );
                 }
                 return;
             }
@@ -96,7 +122,10 @@ namespace RobloxControl {
                     if (RemoveDirectoryWithRetry(itemFullPath)) {
                         LOG_INFO("ClearDirectoryContents: Removed sub-directory: {}", WStringToString(itemFullPath));
                     } else {
-                        LOG_ERROR("ClearDirectoryContents: Failed to remove sub-directory: {}", WStringToString(itemFullPath));
+                        LOG_ERROR(
+                            "ClearDirectoryContents: Failed to remove sub-directory: {}",
+                            WStringToString(itemFullPath)
+                        );
                     }
                 } else {
                     if (DeleteFileWithRetry(itemFullPath)) {
@@ -111,16 +140,21 @@ namespace RobloxControl {
 
             DWORD lastError = GetLastError();
             if (lastError != ERROR_NO_MORE_FILES) {
-                LOG_ERROR("ClearDirectoryContents: Error during file iteration in directory: {} (Error: {})", WStringToString(directoryPath), lastError);
+                LOG_ERROR(
+                    "ClearDirectoryContents: Error during file iteration in directory: {} (Error: {})",
+                    WStringToString(directoryPath),
+                    lastError
+                );
             }
         }
-    }
+    } // namespace
 
     bool IsRobloxRunning() {
         HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if (snap == INVALID_HANDLE_VALUE)
+        if (snap == INVALID_HANDLE_VALUE) {
             return false;
-        PROCESSENTRY32 pe{};
+        }
+        PROCESSENTRY32 pe {};
         pe.dwSize = sizeof(pe);
         bool running = false;
         if (Process32First(snap, &pe)) {
@@ -137,10 +171,11 @@ namespace RobloxControl {
 
     void KillRobloxProcesses() {
         HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        PROCESSENTRY32 pe{};
+        PROCESSENTRY32 pe {};
         pe.dwSize = sizeof(pe);
-        if (hSnap == INVALID_HANDLE_VALUE)
+        if (hSnap == INVALID_HANDLE_VALUE) {
             return;
+        }
 
         if (Process32First(hSnap, &pe)) {
             do {
@@ -151,7 +186,11 @@ namespace RobloxControl {
                         CloseHandle(hProc);
                         LOG_INFO("Terminated Roblox process: {}", pe.th32ProcessID);
                     } else {
-                        LOG_ERROR("Failed to open Roblox process for termination: {} (Error: {})", pe.th32ProcessID, GetLastError());
+                        LOG_ERROR(
+                            "Failed to open Roblox process for termination: {} (Error: {})",
+                            pe.th32ProcessID,
+                            GetLastError()
+                        );
                     }
                 }
             } while (Process32Next(hSnap, &pe));
@@ -172,7 +211,7 @@ namespace RobloxControl {
         }
         std::wstring localAppDataPath_ws = localAppDataPath_c;
 
-        auto directoryExists = [](const std::wstring& path) -> bool {
+        auto directoryExists = [](const std::wstring &path) -> bool {
             DWORD attrib = GetFileAttributesW(path.c_str());
             return (attrib != INVALID_FILE_ATTRIBUTES && (attrib & FILE_ATTRIBUTE_DIRECTORY));
         };
@@ -211,9 +250,8 @@ namespace RobloxControl {
         HANDLE hFindRbx = FindFirstFileW(rbxStoragePattern.c_str(), &findRbxData);
         if (hFindRbx != INVALID_HANDLE_VALUE) {
             do {
-                if (!(findRbxData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
-                    wcscmp(findRbxData.cFileName, L".") != 0 &&
-                    wcscmp(findRbxData.cFileName, L"..") != 0) {
+                if (!(findRbxData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+                    && wcscmp(findRbxData.cFileName, L".") != 0 && wcscmp(findRbxData.cFileName, L"..") != 0) {
                     std::wstring filePathToDelete = robloxBasePath + L"\\" + findRbxData.cFileName;
                     if (DeleteFileWithRetry(filePathToDelete)) {
                         LOG_INFO("Deleted file: {}", WStringToString(filePathToDelete));
@@ -236,21 +274,24 @@ namespace RobloxControl {
     }
 
 #elif __APPLE__
-	bool IsRobloxRunning() {
-	    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
-    	size_t size = 0;
-    	if (sysctl(mib, 4, nullptr, &size, nullptr, 0) < 0)
-    		return false;
+    bool IsRobloxRunning() {
+        int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
+        size_t size = 0;
+        if (sysctl(mib, 4, nullptr, &size, nullptr, 0) < 0) {
+            return false;
+        }
 
-    	std::vector<kinfo_proc> procs(size / sizeof(kinfo_proc));
-    	if (sysctl(mib, 4, procs.data(), &size, nullptr, 0) < 0)
-    		return false;
+        std::vector<kinfo_proc> procs(size / sizeof(kinfo_proc));
+        if (sysctl(mib, 4, procs.data(), &size, nullptr, 0) < 0) {
+            return false;
+        }
 
-    	for (const auto& proc : procs) {
-    		if (std::strcmp(proc.kp_proc.p_comm, "RobloxPlayer") == 0)
-    			return true;
-    	}
-    	return false;
+        for (const auto &proc: procs) {
+            if (std::strcmp(proc.kp_proc.p_comm, "RobloxPlayer") == 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     void KillRobloxProcesses() {
@@ -268,23 +309,22 @@ namespace RobloxControl {
     void ClearRobloxCache() {
         LOG_INFO("Starting Roblox cache clearing process on macOS...");
 
-        const char* home = getenv("HOME");
+        const char *home = getenv("HOME");
         if (!home) {
             LOG_ERROR("Failed to get HOME directory");
             return;
         }
 
-        std::vector<std::string> cachePaths = {
-            std::string(home) + "/Library/Caches/com.roblox.RobloxPlayer",
-            std::string(home) + "/Library/Roblox/LocalStorage",
-            std::string(home) + "/Library/Roblox/OTAPatchBackups",
-            std::string(home) + "/Library/Saved Application State/com.roblox.RobloxPlayer.savedState",
-            std::string(home) + "/Library/HTTPStorages/com.Roblox.Roblox",
-            std::string(home) + "/Library/HTTPStorages/com.roblox.RobloxPlayer",
-            std::string(home) + "/Library/WebKit/com.roblox.RobloxPlayer"
-        };
+        std::vector<std::string> cachePaths
+            = {std::string(home) + "/Library/Caches/com.roblox.RobloxPlayer",
+               std::string(home) + "/Library/Roblox/LocalStorage",
+               std::string(home) + "/Library/Roblox/OTAPatchBackups",
+               std::string(home) + "/Library/Saved Application State/com.roblox.RobloxPlayer.savedState",
+               std::string(home) + "/Library/HTTPStorages/com.Roblox.Roblox",
+               std::string(home) + "/Library/HTTPStorages/com.roblox.RobloxPlayer",
+               std::string(home) + "/Library/WebKit/com.roblox.RobloxPlayer"};
 
-        for (const auto& path : cachePaths) {
+        for (const auto &path: cachePaths) {
             try {
                 if (std::filesystem::exists(path)) {
                     LOG_INFO("Clearing cache directory: {}", path);
@@ -299,7 +339,7 @@ namespace RobloxControl {
                 } else {
                     LOG_INFO("Cache directory not found (this is normal): {}", path);
                 }
-            } catch (const std::filesystem::filesystem_error& e) {
+            } catch (const std::filesystem::filesystem_error &e) {
                 LOG_ERROR("Failed to clear cache at {}: {}", path, e.what());
             }
         }
@@ -308,18 +348,18 @@ namespace RobloxControl {
         if (!std::filesystem::exists(baseDir) || !std::filesystem::is_directory(baseDir)) {
             LOG_INFO("Roblox base directory not found. Skipping rbx-storage cleanup.");
         } else {
-            for (const auto& entry : std::filesystem::directory_iterator(baseDir)) {
-                if (!entry.is_regular_file())
+            for (const auto &entry: std::filesystem::directory_iterator(baseDir)) {
+                if (!entry.is_regular_file()) {
                     continue;
+                }
 
                 std::string filename = entry.path().filename().string();
                 if (filename.rfind("rbx-storage", 0) == 0) {
                     try {
                         std::filesystem::remove(entry.path());
                         LOG_INFO("Deleted: {}", entry.path().string());
-                    } catch (const std::exception& e) {
-                        LOG_ERROR("Failed to delete: {} ({})",
-                            entry.path().string(), e.what());
+                    } catch (const std::exception &e) {
+                        LOG_ERROR("Failed to delete: {} ({})", entry.path().string(), e.what());
                     }
                 }
             }
@@ -345,4 +385,4 @@ namespace RobloxControl {
 
 #endif
 
-}
+} // namespace RobloxControl

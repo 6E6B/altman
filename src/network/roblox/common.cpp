@@ -1,9 +1,10 @@
 #include "common.h"
 
-#include <imgui.h>
-#include <random>
 #include <cctype>
 #include <charconv>
+#include <random>
+
+#include <imgui.h>
 
 ImVec4 getStatusColor(std::string statusCode) {
     if (statusCode == "Online") {
@@ -34,7 +35,7 @@ ImVec4 getStatusColor(std::string statusCode) {
 }
 
 std::string generateSessionId() {
-    static const char* hex = "0123456789abcdef";
+    static const char *hex = "0123456789abcdef";
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_int_distribution<> dis(0, 15);
@@ -76,46 +77,38 @@ std::string presenceTypeToString(int type) {
     }
 }
 
-bool parseUserSpecifier(std::string_view raw, UserSpecifier& out) {
+bool parseUserSpecifier(std::string_view raw, UserSpecifier &out) {
     const std::string_view s = trim_view(raw);
-    if (s.empty())
+    if (s.empty()) {
         return false;
+    }
 
     // Fast path: id=NUMBER (case-insensitive)
-    if (s.size() > 3 &&
-        (s[0] == 'i' || s[0] == 'I') &&
-        (s[1] == 'd' || s[1] == 'D') &&
-        s[2] == '=') {
+    if (s.size() > 3 && (s[0] == 'i' || s[0] == 'I') && (s[1] == 'd' || s[1] == 'D') && s[2] == '=') {
 
         const std::string_view num = s.substr(3);
-        if (num.empty())
+        if (num.empty()) {
             return false;
+        }
 
-        uint64_t value{};
-        const auto [ptr, ec] =
-            std::from_chars(num.data(), num.data() + num.size(), value);
+        uint64_t value {};
+        const auto [ptr, ec] = std::from_chars(num.data(), num.data() + num.size(), value);
 
-        if (ec != std::errc{} || ptr != num.data() + num.size())
+        if (ec != std::errc {} || ptr != num.data() + num.size()) {
             return false;
+        }
 
-        out = {
-            .isId = true,
-            .id = value,
-            .username = {}
-        };
+        out = {.isId = true, .id = value, .username = {}};
         return true;
     }
 
     // Username validation
-    for (unsigned char ch : s) {
-        if (!(std::isalnum(ch) || ch == '_'))
+    for (unsigned char ch: s) {
+        if (!(std::isalnum(ch) || ch == '_')) {
             return false;
+        }
     }
 
-    out = {
-        .isId = false,
-        .id = 0,
-        .username = std::string{s}
-    };
+    out = {.isId = false, .id = 0, .username = std::string {s}};
     return true;
 }

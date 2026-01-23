@@ -1,38 +1,41 @@
 #include "auto_updater.h"
 
-#include <format>
-#include <print>
-#include <fstream>
 #include <algorithm>
-#include <thread>
 #include <array>
+#include <format>
+#include <fstream>
+#include <print>
 #include <ranges>
+#include <thread>
 
-#include "version.h"
 #include "console/console.h"
-#include "utils/thread_task.h"
-#include "utils/paths.h"
 #include "network/http.h"
+#include "system/system_info.h"
 #include "ui/widgets/modal_popup.h"
 #include "ui/widgets/notifications.h"
-#include "system/system_info.h"
 #include "ui/widgets/progress_overlay.h"
+#include "utils/paths.h"
+#include "utils/thread_task.h"
+#include "version.h"
 
 #ifdef _WIN32
-    #include <windows.h>
-	#include <shellapi.h>
+#include <windows.h>
+#include <shellapi.h>
 #else
-    #include <unistd.h>
-    #include <sys/wait.h>
-    #include <sys/sysctl.h>
-    #ifdef __APPLE__
-        #include <mach-o/dyld.h>
-        #include <Security/Security.h>
-        #include <CoreFoundation/CoreFoundation.h>
-        #include <spawn.h>
-        #include <sys/stat.h>
-        extern char **environ;
-    #endif
+
+#include <sys/sysctl.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#ifdef __APPLE__
+#include <CoreFoundation/CoreFoundation.h>
+#include <Security/Security.h>
+#include <mach-o/dyld.h>
+#include <spawn.h>
+#include <sys/stat.h>
+extern char **environ;
+#endif
+
 #endif
 
 std::filesystem::path UpdaterConfig::GetConfigPath() {
@@ -41,16 +44,16 @@ std::filesystem::path UpdaterConfig::GetConfigPath() {
 
 void UpdaterConfig::Save() const {
     const nlohmann::json j = {
-        {"channel", static_cast<int>(channel)},
-        {"autoCheck", autoCheck},
-        {"autoDownload", autoDownload},
-        {"autoInstall", autoInstall},
-        {"bandwidthLimit", bandwidthLimit},
-        {"lastCheck", std::chrono::system_clock::to_time_t(lastCheck)},
-        {"lastInstalledVersion", lastInstalledVersion},
-        {"backupPath", backupPath.string()},
-        {"resumeFilePath", resumeFilePath.string()},
-        {"resumeOffset", resumeOffset}
+        {"channel",              static_cast<int>(channel)                      },
+        {"autoCheck",            autoCheck                                      },
+        {"autoDownload",         autoDownload                                   },
+        {"autoInstall",          autoInstall                                    },
+        {"bandwidthLimit",       bandwidthLimit                                 },
+        {"lastCheck",            std::chrono::system_clock::to_time_t(lastCheck)},
+        {"lastInstalledVersion", lastInstalledVersion                           },
+        {"backupPath",           backupPath.string()                            },
+        {"resumeFilePath",       resumeFilePath.string()                        },
+        {"resumeOffset",         resumeOffset                                   }
     };
 
     if (std::ofstream file(GetConfigPath()); file.is_open()) {
@@ -86,14 +89,17 @@ namespace {
     UpdaterConfig config;
     std::filesystem::path pendingUpdatePath;
     DownloadState currentDownload;
-	constexpr std::string_view UPDATE_TASK_ID = "auto_update_download";
-}
+    constexpr std::string_view UPDATE_TASK_ID = "auto_update_download";
+} // namespace
 
 constexpr std::string_view AutoUpdater::GetChannelName(UpdateChannel channel) noexcept {
     switch (channel) {
-        case UpdateChannel::Beta: return "beta";
-        case UpdateChannel::Dev: return "dev";
-        default: return "stable";
+        case UpdateChannel::Beta:
+            return "beta";
+        case UpdateChannel::Dev:
+            return "dev";
+        default:
+            return "stable";
     }
 }
 
@@ -147,14 +153,14 @@ std::filesystem::path AutoUpdater::GetUpdateScriptPath() {
 
 std::filesystem::path AutoUpdater::GetCurrentExecutablePath() {
 #ifdef _WIN32
-    std::array<wchar_t, MAX_PATH> buffer{};
+    std::array<wchar_t, MAX_PATH> buffer {};
     GetModuleFileNameW(nullptr, buffer.data(), MAX_PATH);
     return std::filesystem::path(buffer.data());
 #elif __APPLE__
-    std::array<char, 1024> buffer{};
+    std::array<char, 1024> buffer {};
     uint32_t size = buffer.size();
     if (_NSGetExecutablePath(buffer.data(), &size) == 0) {
-        std::array<char, PATH_MAX> resolved{};
+        std::array<char, PATH_MAX> resolved {};
         if (realpath(buffer.data(), resolved.data())) {
             return std::filesystem::path(resolved.data());
         }
@@ -182,58 +188,66 @@ std::filesystem::path AutoUpdater::GetAppBundlePath() {
 #endif
 }
 
-void AutoUpdater::CreateUpdateScript(const std::string& newPath, const std::string& currentPath, const std::string& backupPath) {
+void AutoUpdater::CreateUpdateScript(
+    const std::string &newPath,
+    const std::string &currentPath,
+    const std::string &backupPath
+) {
     const auto scriptPath = GetUpdateScriptPath();
     std::ofstream script(scriptPath);
 
 #ifdef _WIN32
-    std::format_to(std::ostreambuf_iterator<char>(script),
-	    "$ErrorActionPreference = 'Stop'\n"
-		"$LogFile = \"$env:TEMP\\altman_update.log\"\n"
-		"\n"
-		"try {{\n"
-		"    Start-Sleep -Seconds 2\n"
-		"\n"
-		"    $NewPath = '{}'\n"
-		"    $CurrentPath = '{}'\n"
-		"    $BackupPath = '{}'\n"
-		"\n"
-		"    $BackupDir = Split-Path -Parent $BackupPath\n"
-		"    if (-not (Test-Path $BackupDir)) {{\n"
-		"        New-Item -ItemType Directory -Path $BackupDir -Force | Out-Null\n"
-		"    }}\n"
-		"\n"
-		"    Copy-Item -Path $CurrentPath -Destination $BackupPath -Force\n"
-		"    Move-Item -Path $NewPath -Destination $CurrentPath -Force\n"
-		"    Start-Process -FilePath $CurrentPath\n"
-		"    Remove-Item -Path $MyInvocation.MyCommand.Source -Force\n"
-		"}}\n"
-		"catch {{\n"
-		"    $_.Exception.Message | Out-File -FilePath $LogFile\n"
-		"}}\n",
-		newPath, currentPath, backupPath
+    std::format_to(
+        std::ostreambuf_iterator<char>(script),
+        "$ErrorActionPreference = 'Stop'\n"
+        "$LogFile = \"$env:TEMP\\altman_update.log\"\n"
+        "\n"
+        "try {{\n"
+        "    Start-Sleep -Seconds 2\n"
+        "\n"
+        "    $NewPath = '{}'\n"
+        "    $CurrentPath = '{}'\n"
+        "    $BackupPath = '{}'\n"
+        "\n"
+        "    $BackupDir = Split-Path -Parent $BackupPath\n"
+        "    if (-not (Test-Path $BackupDir)) {{\n"
+        "        New-Item -ItemType Directory -Path $BackupDir -Force | Out-Null\n"
+        "    }}\n"
+        "\n"
+        "    Copy-Item -Path $CurrentPath -Destination $BackupPath -Force\n"
+        "    Move-Item -Path $NewPath -Destination $CurrentPath -Force\n"
+        "    Start-Process -FilePath $CurrentPath\n"
+        "    Remove-Item -Path $MyInvocation.MyCommand.Source -Force\n"
+        "}}\n"
+        "catch {{\n"
+        "    $_.Exception.Message | Out-File -FilePath $LogFile\n"
+        "}}\n",
+        newPath,
+        currentPath,
+        backupPath
     );
 #else
-    std::format_to(std::ostreambuf_iterator<char>(script),
-    	"#!/bin/bash\n"
-		"set -e\n"
-		"\n"
-		"LOG_FILE=\"/tmp/altman_update.log\"\n"
-		"exec > \"$LOG_FILE\" 2>&1\n"
-		"\n"
-		"echo \"Update script started at $(date)\"\n"
-		"echo 'Waiting for application to close...'\n"
-		"sleep 2\n"
-		"\n"
-		"NEW_PATH=\"{}\"\n"
-		"CURRENT_PATH=\"{}\"\n"
-		"BACKUP_PATH=\"{}\"\n"
-		"\n"
-		"echo \"NEW_PATH: $NEW_PATH\"\n"
-		"echo \"CURRENT_PATH: $CURRENT_PATH\"\n"
-		"echo \"BACKUP_PATH: $BACKUP_PATH\"\n"
-		"\n"
-		"echo 'Creating backup...'\n"
+    std::format_to(
+        std::ostreambuf_iterator<char>(script),
+        "#!/bin/bash\n"
+        "set -e\n"
+        "\n"
+        "LOG_FILE=\"/tmp/altman_update.log\"\n"
+        "exec > \"$LOG_FILE\" 2>&1\n"
+        "\n"
+        "echo \"Update script started at $(date)\"\n"
+        "echo 'Waiting for application to close...'\n"
+        "sleep 2\n"
+        "\n"
+        "NEW_PATH=\"{}\"\n"
+        "CURRENT_PATH=\"{}\"\n"
+        "BACKUP_PATH=\"{}\"\n"
+        "\n"
+        "echo \"NEW_PATH: $NEW_PATH\"\n"
+        "echo \"CURRENT_PATH: $CURRENT_PATH\"\n"
+        "echo \"BACKUP_PATH: $BACKUP_PATH\"\n"
+        "\n"
+        "echo 'Creating backup...'\n"
         "if [[ -d \"$CURRENT_PATH\" ]]; then\n"
         "    cp -R \"$CURRENT_PATH\" \"$BACKUP_PATH\"\n"
         "else\n"
@@ -266,17 +280,19 @@ void AutoUpdater::CreateUpdateScript(const std::string& newPath, const std::stri
         "fi\n"
         "\n"
         "rm \"$0\"\n",
-        newPath, currentPath, backupPath
+        newPath,
+        currentPath,
+        backupPath
     );
 #endif
 
     script.close();
 
 #ifndef _WIN32
-    std::filesystem::permissions(scriptPath,
-        std::filesystem::perms::owner_exec |
-        std::filesystem::perms::owner_read |
-        std::filesystem::perms::owner_write);
+    std::filesystem::permissions(
+        scriptPath,
+        std::filesystem::perms::owner_exec | std::filesystem::perms::owner_read | std::filesystem::perms::owner_write
+    );
 #endif
 }
 
@@ -284,37 +300,33 @@ void AutoUpdater::LaunchUpdateScript() {
     const auto scriptPath = GetUpdateScriptPath();
 
 #ifdef _WIN32
-	SHELLEXECUTEINFOW sei{};
-	sei.cbSize = sizeof(sei);
-	sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-	sei.lpVerb = L"open";
-	sei.lpFile = L"powershell.exe";
+    SHELLEXECUTEINFOW sei {};
+    sei.cbSize = sizeof(sei);
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+    sei.lpVerb = L"open";
+    sei.lpFile = L"powershell.exe";
 
-	std::wstring args = L"-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \""
-		+ scriptPath.wstring() + L"\"";
-	sei.lpParameters = args.c_str();
-	sei.nShow = SW_HIDE;
+    std::wstring args
+        = L"-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"" + scriptPath.wstring() + L"\"";
+    sei.lpParameters = args.c_str();
+    sei.nShow = SW_HIDE;
 
-	if (!ShellExecuteExW(&sei)) {
-		LOG_ERROR("Failed to launch update script: {}", GetLastError());
-		return;
-	}
+    if (!ShellExecuteExW(&sei)) {
+        LOG_ERROR("Failed to launch update script: {}", GetLastError());
+        return;
+    }
 
-	if (sei.hProcess) {
-		CloseHandle(sei.hProcess);
-	}
+    if (sei.hProcess) {
+        CloseHandle(sei.hProcess);
+    }
 #else
-	pid_t pid;
-	std::string path = scriptPath.string();
-	char* argv[] = {
-		const_cast<char*>("/bin/bash"),
-		const_cast<char*>(path.c_str()),
-		nullptr
-	};
+    pid_t pid;
+    std::string path = scriptPath.string();
+    char *argv[] = {const_cast<char *>("/bin/bash"), const_cast<char *>(path.c_str()), nullptr};
 
-	if (posix_spawn(&pid, "/bin/bash", nullptr, nullptr, argv, environ) != 0) {
-		LOG_ERROR("Failed to launch update script");
-	}
+    if (posix_spawn(&pid, "/bin/bash", nullptr, nullptr, argv, environ) != 0) {
+        LOG_ERROR("Failed to launch update script");
+    }
 #endif
 }
 
@@ -339,7 +351,7 @@ std::string AutoUpdater::FormatSpeed(size_t bytesPerSecond) noexcept {
 }
 
 #ifdef __APPLE__
-bool AutoUpdater::ExtractZipToPath(const std::filesystem::path& zipPath, const std::filesystem::path& destPath) {
+bool AutoUpdater::ExtractZipToPath(const std::filesystem::path &zipPath, const std::filesystem::path &destPath) {
     LOG_INFO("Extracting {} to {}", zipPath.string(), destPath.string());
 
     std::filesystem::create_directories(destPath);
@@ -356,17 +368,20 @@ bool AutoUpdater::ExtractZipToPath(const std::filesystem::path& zipPath, const s
     return true;
 }
 
-bool AutoUpdater::IsUniversalBinary(const std::filesystem::path& binaryPath) {
-    const auto cmd = std::format("lipo -info \"{}\" 2>/dev/null | grep -q 'Architectures in the fat file'",
-        binaryPath.string());
+bool AutoUpdater::IsUniversalBinary(const std::filesystem::path &binaryPath) {
+    const auto cmd
+        = std::format("lipo -info \"{}\" 2>/dev/null | grep -q 'Architectures in the fat file'", binaryPath.string());
     return std::system(cmd.c_str()) == 0;
 }
 
-bool AutoUpdater::ExtractSlice(const std::filesystem::path& binaryPath, const std::string& arch, const std::filesystem::path& outputPath) {
+bool AutoUpdater::ExtractSlice(
+    const std::filesystem::path &binaryPath,
+    const std::string &arch,
+    const std::filesystem::path &outputPath
+) {
     LOG_INFO("Extracting {} slice from {}", arch, binaryPath.string());
 
-    const auto cmd = std::format("lipo \"{}\" -thin {} -output \"{}\"",
-        binaryPath.string(), arch, outputPath.string());
+    const auto cmd = std::format("lipo \"{}\" -thin {} -output \"{}\"", binaryPath.string(), arch, outputPath.string());
 
     const int result = std::system(cmd.c_str());
     if (result != 0) {
@@ -377,11 +392,19 @@ bool AutoUpdater::ExtractSlice(const std::filesystem::path& binaryPath, const st
     return true;
 }
 
-bool AutoUpdater::CreateUniversalBinary(const std::filesystem::path& arm64Path, const std::filesystem::path& x86_64Path, const std::filesystem::path& outputPath) {
+bool AutoUpdater::CreateUniversalBinary(
+    const std::filesystem::path &arm64Path,
+    const std::filesystem::path &x86_64Path,
+    const std::filesystem::path &outputPath
+) {
     LOG_INFO("Creating universal binary at {}", outputPath.string());
 
-    const auto cmd = std::format("lipo -create \"{}\" \"{}\" -output \"{}\"",
-        arm64Path.string(), x86_64Path.string(), outputPath.string());
+    const auto cmd = std::format(
+        "lipo -create \"{}\" \"{}\" -output \"{}\"",
+        arm64Path.string(),
+        x86_64Path.string(),
+        outputPath.string()
+    );
 
     const int result = std::system(cmd.c_str());
     if (result != 0) {
@@ -394,9 +417,11 @@ bool AutoUpdater::CreateUniversalBinary(const std::filesystem::path& arm64Path, 
     return true;
 }
 
-bool AutoUpdater::ApplyUniversalDeltaUpdate(const std::filesystem::path& arm64PatchPath,
-                                            const std::filesystem::path& x86_64PatchPath,
-                                            const std::filesystem::path& outputAppPath) {
+bool AutoUpdater::ApplyUniversalDeltaUpdate(
+    const std::filesystem::path &arm64PatchPath,
+    const std::filesystem::path &x86_64PatchPath,
+    const std::filesystem::path &outputAppPath
+) {
     LOG_INFO("Applying universal binary delta update...");
 
     const auto currentAppPath = GetAppBundlePath();
@@ -470,7 +495,11 @@ bool AutoUpdater::ApplyUniversalDeltaUpdate(const std::filesystem::path& arm64Pa
 }
 #endif
 
-bool AutoUpdater::ApplyDeltaPatch(const std::filesystem::path& oldFile, const std::filesystem::path& patchFile, const std::filesystem::path& newFile) {
+bool AutoUpdater::ApplyDeltaPatch(
+    const std::filesystem::path &oldFile,
+    const std::filesystem::path &patchFile,
+    const std::filesystem::path &newFile
+) {
     LOG_INFO("Applying delta patch...");
     LOG_INFO("  Old: {}", oldFile.string());
     LOG_INFO("  Patch: {}", patchFile.string());
@@ -479,13 +508,13 @@ bool AutoUpdater::ApplyDeltaPatch(const std::filesystem::path& oldFile, const st
 #ifdef _WIN32
     // Windows: Use xdelta3
     // xdelta3 -d -s <old> <patch> <new>
-    const auto cmd = std::format("xdelta3 -d -s \"{}\" \"{}\" \"{}\"",
-        oldFile.string(), patchFile.string(), newFile.string());
+    const auto cmd
+        = std::format("xdelta3 -d -s \"{}\" \"{}\" \"{}\"", oldFile.string(), patchFile.string(), newFile.string());
 #else
     // macOS: Use bspatch
     // bspatch <old> <new> <patch>
-    const auto cmd = std::format("bspatch \"{}\" \"{}\" \"{}\"",
-        oldFile.string(), newFile.string(), patchFile.string());
+    const auto cmd
+        = std::format("bspatch \"{}\" \"{}\" \"{}\"", oldFile.string(), newFile.string(), patchFile.string());
 #endif
 
     LOG_INFO("Running: {}", cmd);
@@ -500,7 +529,7 @@ bool AutoUpdater::ApplyDeltaPatch(const std::filesystem::path& oldFile, const st
     return true;
 }
 
-UpdateInfo AutoUpdater::ParseReleaseInfo(const nlohmann::json& release, UpdateChannel channel) {
+UpdateInfo AutoUpdater::ParseReleaseInfo(const nlohmann::json &release, UpdateChannel channel) {
     UpdateInfo info;
     info.version = release.value("tag_name", "");
 
@@ -510,8 +539,9 @@ UpdateInfo AutoUpdater::ParseReleaseInfo(const nlohmann::json& release, UpdateCh
 
     info.changelog = release.value("body", "");
     info.channel = channel;
-    info.isCritical = (info.changelog.find("[CRITICAL]") != std::string::npos ||
-                      info.changelog.find("[SECURITY]") != std::string::npos);
+    info.isCritical
+        = (info.changelog.find("[CRITICAL]") != std::string::npos
+           || info.changelog.find("[SECURITY]") != std::string::npos);
 
     const auto fullAssetName = GetPlatformAssetName(channel);
 
@@ -519,10 +549,10 @@ UpdateInfo AutoUpdater::ParseReleaseInfo(const nlohmann::json& release, UpdateCh
     const auto deltaAssetName = GetDeltaAssetName(APP_VERSION, info.version);
 #else
     // macOS: look for both arm64 and x86_64 delta patches
-    const auto deltaAssetName_arm64 = std::format("AltMan-Delta-{}-to-{}-macOS-arm64.bsdiff",
-        APP_VERSION, info.version);
-    const auto deltaAssetName_x86_64 = std::format("AltMan-Delta-{}-to-{}-macOS-x86_64.bsdiff",
-        APP_VERSION, info.version);
+    const auto deltaAssetName_arm64
+        = std::format("AltMan-Delta-{}-to-{}-macOS-arm64.bsdiff", APP_VERSION, info.version);
+    const auto deltaAssetName_x86_64
+        = std::format("AltMan-Delta-{}-to-{}-macOS-x86_64.bsdiff", APP_VERSION, info.version);
 #endif
 
     LOG_INFO("Looking for full asset: '{}'", fullAssetName);
@@ -533,7 +563,7 @@ UpdateInfo AutoUpdater::ParseReleaseInfo(const nlohmann::json& release, UpdateCh
 #endif
 
     if (release.contains("assets")) {
-        for (const auto& asset : release["assets"]) {
+        for (const auto &asset: release["assets"]) {
             const std::string name = asset.value("name", "");
 
             if (name == fullAssetName) {
@@ -552,8 +582,7 @@ UpdateInfo AutoUpdater::ParseReleaseInfo(const nlohmann::json& release, UpdateCh
                 info.deltaUrl_arm64 = asset.value("browser_download_url", "");
                 info.deltaSize_arm64 = asset.value("size", 0);
                 LOG_INFO("Found arm64 delta: {} ({} bytes)", name, info.deltaSize_arm64);
-            }
-            else if (name == deltaAssetName_x86_64) {
+            } else if (name == deltaAssetName_x86_64) {
                 info.deltaUrl_x86_64 = asset.value("browser_download_url", "");
                 info.deltaSize_x86_64 = asset.value("size", 0);
                 LOG_INFO("Found x86_64 delta: {} ({} bytes)", name, info.deltaSize_x86_64);
@@ -578,7 +607,7 @@ std::string AutoUpdater::GetReleaseEndpoint(UpdateChannel channel) {
     }
 }
 
-bool AutoUpdater::MatchesChannel(const nlohmann::json& release, UpdateChannel channel) {
+bool AutoUpdater::MatchesChannel(const nlohmann::json &release, UpdateChannel channel) {
     const bool isPrerelease = release.value("prerelease", false);
     const std::string tag = release.value("tag_name", "");
 
@@ -588,8 +617,7 @@ bool AutoUpdater::MatchesChannel(const nlohmann::json& release, UpdateChannel ch
         case UpdateChannel::Beta:
             return isPrerelease && (tag.find("beta") != std::string::npos);
         case UpdateChannel::Dev:
-            return isPrerelease && (tag.find("dev") != std::string::npos ||
-                                   tag.find("alpha") != std::string::npos);
+            return isPrerelease && (tag.find("dev") != std::string::npos || tag.find("alpha") != std::string::npos);
     }
     return false;
 }
@@ -651,7 +679,7 @@ void AutoUpdater::CancelDownload() noexcept {
     currentDownload.shouldCancel.store(true);
 }
 
-const DownloadState& AutoUpdater::GetDownloadState() noexcept {
+const DownloadState &AutoUpdater::GetDownloadState() noexcept {
     return currentDownload;
 }
 
@@ -677,18 +705,23 @@ void AutoUpdater::CheckForUpdates(bool silent) {
         LOG_INFO("Checking for updates (channel: {})", GetChannelName(config.channel));
 
         const auto endpoint = GetReleaseEndpoint(config.channel);
-        const auto resp = HttpClient::get(endpoint, {
-            {"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
-            {"Accept", "application/vnd.github+json"}
-        });
+        const auto resp = HttpClient::get(
+            endpoint,
+            {
+                {"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+                {"Accept",     "application/vnd.github+json"                                 }
+        }
+        );
 
         if (resp.status_code != 200) {
             LOG_ERROR("Failed to check for updates: HTTP {}", resp.status_code);
 
             if (!silent) {
                 ThreadTask::RunOnMain([]() {
-                    UpdateNotification::Show("Update Check Failed",
-                        "Failed to check for updates. Please try again later.");
+                    UpdateNotification::Show(
+                        "Update Check Failed",
+                        "Failed to check for updates. Please try again later."
+                    );
                 });
             }
             return;
@@ -702,7 +735,7 @@ void AutoUpdater::CheckForUpdates(bool silent) {
             updateInfo = AutoUpdater::ParseReleaseInfo(releases, config.channel);
             foundUpdate = (!updateInfo.version.empty() && updateInfo.version != APP_VERSION);
         } else if (releases.is_array()) {
-            for (const auto& release : releases) {
+            for (const auto &release: releases) {
                 if (AutoUpdater::MatchesChannel(release, config.channel)) {
                     updateInfo = AutoUpdater::ParseReleaseInfo(release, config.channel);
                     if (!updateInfo.version.empty() && updateInfo.version != APP_VERSION) {
@@ -731,10 +764,9 @@ void AutoUpdater::CheckForUpdates(bool silent) {
     });
 }
 
-void AutoUpdater::HandleUpdateAvailable(const UpdateInfo& info, bool silent) {
-    const auto channelLabel = (info.channel != UpdateChannel::Stable)
-        ? std::format(" ({})", GetChannelName(info.channel))
-        : "";
+void AutoUpdater::HandleUpdateAvailable(const UpdateInfo &info, bool silent) {
+    const auto channelLabel
+        = (info.channel != UpdateChannel::Stable) ? std::format(" ({})", GetChannelName(info.channel)) : "";
 
     std::string msg = std::format("Version {}{} is available!", info.version, channelLabel);
 
@@ -768,7 +800,7 @@ void AutoUpdater::HandleUpdateAvailable(const UpdateInfo& info, bool silent) {
     }
 }
 
-void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo& info, bool autoInstall) {
+void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo &info, bool autoInstall) {
     ThreadTask::fireAndForget([info, autoInstall]() {
         const bool useDelta = info.hasDelta();
         bool success = false;
@@ -783,26 +815,30 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo& info, bool autoInst
         const auto outputExePath = tempDir / "AltMan.exe";
 #endif
 
-    	ThreadTask::RunOnMain([&info, useDelta]() {
-			ProgressOverlay::Add(
-				std::string(UPDATE_TASK_ID),
-				useDelta ? "Downloading delta update" : "Downloading update",
-				true,
-				[]() { CancelDownload(); }
-			);
-			ProgressOverlay::Update(std::string(UPDATE_TASK_ID), 0.0f,
-				std::format("0 / {}", FormatBytes(useDelta ? info.totalDeltaSize() : info.fullSize)));
-		});
+        ThreadTask::RunOnMain([&info, useDelta]() {
+            ProgressOverlay::Add(
+                std::string(UPDATE_TASK_ID),
+                useDelta ? "Downloading delta update" : "Downloading update",
+                true,
+                []() {
+                    CancelDownload();
+                }
+            );
+            ProgressOverlay::Update(
+                std::string(UPDATE_TASK_ID),
+                0.0f,
+                std::format("0 / {}", FormatBytes(useDelta ? info.totalDeltaSize() : info.fullSize))
+            );
+        });
 
-    	const auto progressCallback = [](int percentage, size_t speed, size_t total) {
-			ThreadTask::RunOnMain([percentage, speed, total]() {
-				const float progress = static_cast<float>(percentage) / 100.0f;
-				const auto detail = std::format("{} • {}",
-					FormatBytes(static_cast<size_t>(progress * total)),
-					FormatSpeed(speed));
-				ProgressOverlay::Update(std::string(UPDATE_TASK_ID), progress, detail);
-			});
-		};
+        const auto progressCallback = [](int percentage, size_t speed, size_t total) {
+            ThreadTask::RunOnMain([percentage, speed, total]() {
+                const float progress = static_cast<float>(percentage) / 100.0f;
+                const auto detail
+                    = std::format("{} • {}", FormatBytes(static_cast<size_t>(progress * total)), FormatSpeed(speed));
+                ProgressOverlay::Update(std::string(UPDATE_TASK_ID), progress, detail);
+            });
+        };
 
         if (useDelta) {
 #ifdef __APPLE__
@@ -870,14 +906,14 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo& info, bool autoInst
             success = DownloadFileWithResume(info.downloadUrl, zipPath, progressCallback);
 
             if (success) {
-            	LOG_INFO("Extracting update...");
+                LOG_INFO("Extracting update...");
 
                 const auto extractPath = tempDir / "extracted";
                 success = ExtractZipToPath(zipPath, extractPath);
                 std::filesystem::remove(zipPath);
 
                 if (success) {
-                    for (const auto& entry : std::filesystem::directory_iterator(extractPath)) {
+                    for (const auto &entry: std::filesystem::directory_iterator(extractPath)) {
                         if (entry.path().extension() == ".app") {
                             if (std::filesystem::exists(outputAppPath)) {
                                 std::filesystem::remove_all(outputAppPath);
@@ -895,17 +931,17 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo& info, bool autoInst
 #endif
         }
 
-    	if (!success) {
-			ThreadTask::RunOnMain([]() {
-				ProgressOverlay::Complete(std::string(UPDATE_TASK_ID), false, "Download failed");
-			});
-			std::filesystem::remove_all(tempDir);
-			return;
-		}
+        if (!success) {
+            ThreadTask::RunOnMain([]() {
+                ProgressOverlay::Complete(std::string(UPDATE_TASK_ID), false, "Download failed");
+            });
+            std::filesystem::remove_all(tempDir);
+            return;
+        }
 
-    	ThreadTask::RunOnMain([]() {
-			ProgressOverlay::Complete(std::string(UPDATE_TASK_ID), true, "Ready to install");
-		});
+        ThreadTask::RunOnMain([]() {
+            ProgressOverlay::Complete(std::string(UPDATE_TASK_ID), true, "Ready to install");
+        });
 
 
 #ifdef __APPLE__
@@ -921,17 +957,19 @@ void AutoUpdater::DownloadAndInstallUpdate(const UpdateInfo& info, bool autoInst
             });
         } else {
             ThreadTask::RunOnMain([]() {
-            	UpdateNotification::ShowPersistent("Update Ready",
-						"Click to install and restart", []() {
-							InstallUpdate(pendingUpdatePath);
-            	});
+                UpdateNotification::ShowPersistent("Update Ready", "Click to install and restart", []() {
+                    InstallUpdate(pendingUpdatePath);
+                });
             });
         }
     });
 }
 
-bool AutoUpdater::DownloadFileWithResume(std::string_view url, const std::filesystem::path& outputPath,
-                                         std::function<void(int, size_t, size_t)> progressCallback) {
+bool AutoUpdater::DownloadFileWithResume(
+    std::string_view url,
+    const std::filesystem::path &outputPath,
+    std::function<void(int, size_t, size_t)> progressCallback
+) {
     LOG_INFO("Downloading: {}", url);
 
     currentDownload.url = std::string(url);
@@ -958,7 +996,7 @@ bool AutoUpdater::DownloadFileWithResume(std::string_view url, const std::filesy
         {"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
     };
 
-    HttpClient::DownloadControl control{
+    HttpClient::DownloadControl control {
         .shouldCancel = &currentDownload.shouldCancel,
         .isPaused = &currentDownload.isPaused,
         .bandwidthLimit = config.bandwidthLimit
@@ -971,9 +1009,7 @@ bool AutoUpdater::DownloadFileWithResume(std::string_view url, const std::filesy
             currentDownload.totalBytes.store(total);
             currentDownload.lastUpdateTime = std::chrono::steady_clock::now();
 
-            const int percentage = total > 0
-                ? static_cast<int>((downloaded * 100) / total)
-                : 0;
+            const int percentage = total > 0 ? static_cast<int>((downloaded * 100) / total) : 0;
 
             ThreadTask::RunOnMain([progressCallback, percentage, bytesPerSecond, total]() {
                 progressCallback(percentage, bytesPerSecond, total);
@@ -1018,10 +1054,11 @@ bool AutoUpdater::DownloadFileWithResume(std::string_view url, const std::filesy
 
     if (progressCallback) {
         const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::steady_clock::now() - currentDownload.startTime).count();
-        const size_t bytesPerSecond = elapsed > 0
-            ? (result.bytesDownloaded - startOffset) / static_cast<size_t>(elapsed)
-            : 0;
+                                 std::chrono::steady_clock::now() - currentDownload.startTime
+        )
+                                 .count();
+        const size_t bytesPerSecond
+            = elapsed > 0 ? (result.bytesDownloaded - startOffset) / static_cast<size_t>(elapsed) : 0;
 
         ThreadTask::RunOnMain([progressCallback, bytesPerSecond, total = result.totalBytes]() {
             progressCallback(100, bytesPerSecond, total);
@@ -1032,7 +1069,7 @@ bool AutoUpdater::DownloadFileWithResume(std::string_view url, const std::filesy
     return true;
 }
 
-void AutoUpdater::InstallUpdate(const std::filesystem::path& updatePath) {
+void AutoUpdater::InstallUpdate(const std::filesystem::path &updatePath) {
     LOG_INFO("Installing update from: {}", updatePath.string());
 
 #ifdef __APPLE__
@@ -1057,8 +1094,7 @@ void AutoUpdater::RollbackToPreviousVersion() {
         LOG_ERROR("No backup available for rollback");
 
         ThreadTask::RunOnMain([]() {
-            UpdateNotification::Show("Rollback Failed",
-                "No backup found. Cannot rollback.", 5.0f);
+            UpdateNotification::Show("Rollback Failed", "No backup found. Cannot rollback.", 5.0f);
         });
         return;
     }
@@ -1067,10 +1103,10 @@ void AutoUpdater::RollbackToPreviousVersion() {
 #ifdef __APPLE__
         const auto currentPath = GetAppBundlePath();
         const auto tempBackup = std::filesystem::temp_directory_path() / "altman_rollback_tmp.app";
-    	if (std::filesystem::exists(tempBackup)) {
-			std::filesystem::remove_all(tempBackup);
-		}
-    	std::println("rolling back from {} to {}", currentPath.string(), tempBackup.string());
+        if (std::filesystem::exists(tempBackup)) {
+            std::filesystem::remove_all(tempBackup);
+        }
+        std::println("rolling back from {} to {}", currentPath.string(), tempBackup.string());
 #else
         const auto currentPath = GetCurrentExecutablePath();
         auto tempBackup = std::filesystem::path(currentPath).concat(".rollback_tmp");
@@ -1079,11 +1115,10 @@ void AutoUpdater::RollbackToPreviousVersion() {
         CreateUpdateScript(config.backupPath.string(), currentPath.string(), tempBackup.string());
 
         ThreadTask::RunOnMain([]() {
-            ModalPopup::AddYesNo("Rolling back to previous version. Restart now?",
-                []() {
-                    LaunchUpdateScript();
-                    std::exit(0);
-                });
+            ModalPopup::AddYesNo("Rolling back to previous version. Restart now?", []() {
+                LaunchUpdateScript();
+                std::exit(0);
+            });
         });
     });
 }
@@ -1097,7 +1132,7 @@ void AutoUpdater::CleanupOldBackups(int keepCount) {
 
     std::vector<std::filesystem::path> backups;
 
-    for (const auto& entry : std::filesystem::directory_iterator(backupDir)) {
+    for (const auto &entry: std::filesystem::directory_iterator(backupDir)) {
         const auto filename = entry.path().filename().string();
         if (filename.find("AltMan") != std::string::npos) {
             backups.push_back(entry.path());
@@ -1108,7 +1143,7 @@ void AutoUpdater::CleanupOldBackups(int keepCount) {
         return;
     }
 
-    std::ranges::sort(backups, [](const std::filesystem::path& a, const std::filesystem::path& b) {
+    std::ranges::sort(backups, [](const std::filesystem::path &a, const std::filesystem::path &b) {
         return std::filesystem::last_write_time(a) > std::filesystem::last_write_time(b);
     });
 
@@ -1124,13 +1159,16 @@ void AutoUpdater::CleanupOldBackups(int keepCount) {
 #ifdef __APPLE__
 std::string GetApplicationNameFromBundleId() {
     CFBundleRef mainBundle = CFBundleGetMainBundle();
-    if (!mainBundle) return "";
+    if (!mainBundle) {
+        return "";
+    }
 
-    auto nameRef = static_cast<CFStringRef>(
-        CFBundleGetValueForInfoDictionaryKey(mainBundle, kCFBundleNameKey));
-    if (!nameRef) return "";
+    auto nameRef = static_cast<CFStringRef>(CFBundleGetValueForInfoDictionaryKey(mainBundle, kCFBundleNameKey));
+    if (!nameRef) {
+        return "";
+    }
 
-    std::array<char, 256> buffer{};
+    std::array<char, 256> buffer {};
     if (!CFStringGetCString(nameRef, buffer.data(), buffer.size(), kCFStringEncodingUTF8)) {
         return "";
     }

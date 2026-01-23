@@ -1,13 +1,13 @@
-#include <filesystem>
-#include <fstream>
-#include <string>
-#include <vector>
+#include <algorithm>
 #include <cctype>
 #include <cstdlib>
-#include <string_view>
-#include <regex>
-#include <algorithm>
+#include <filesystem>
 #include <format>
+#include <fstream>
+#include <regex>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #include "ui/windows/history/history_log_parser.h"
 
@@ -82,34 +82,39 @@ namespace {
         return {};
     }
 
-    void processOutputLine(LogInfo& logInfo, std::string_view line) {
+    void processOutputLine(LogInfo &logInfo, std::string_view line) {
         if (line.find(OUTPUT_TOKEN) != std::string_view::npos) {
             logInfo.outputLines.emplace_back(line);
         }
     }
 
-    void processChannel(LogInfo& logInfo, std::string_view line) {
+    void processChannel(LogInfo &logInfo, std::string_view line) {
         if (!logInfo.channel.empty()) {
             return;
         }
         logInfo.channel = extractToken(line, CHANNEL_TOKEN, WHITESPACE);
     }
 
-    void processVersion(LogInfo& logInfo, std::string_view line) {
+    void processVersion(LogInfo &logInfo, std::string_view line) {
         if (!logInfo.version.empty()) {
             return;
         }
         logInfo.version = extractQuotedValue(line, VERSION_TOKEN);
     }
 
-    void processJoinTime(LogInfo& logInfo, std::string_view line) {
+    void processJoinTime(LogInfo &logInfo, std::string_view line) {
         if (!logInfo.joinTime.empty()) {
             return;
         }
         logInfo.joinTime = extractToken(line, JOIN_TIME_TOKEN, WHITESPACE);
     }
 
-    void processJobId(LogInfo& logInfo, std::string_view line, std::string_view timestamp, GameSession*& currentSession) {
+    void processJobId(
+        LogInfo &logInfo,
+        std::string_view line,
+        std::string_view timestamp,
+        GameSession *&currentSession
+    ) {
         const size_t tokenPos = line.find(JOB_ID_TOKEN);
         if (tokenPos == std::string_view::npos) {
             return;
@@ -140,7 +145,7 @@ namespace {
         }
     }
 
-    void processPlaceId(LogInfo& logInfo, std::string_view line, GameSession* currentSession) {
+    void processPlaceId(LogInfo &logInfo, std::string_view line, GameSession *currentSession) {
         if (currentSession == nullptr) {
             return;
         }
@@ -157,7 +162,7 @@ namespace {
         }
     }
 
-    void processUniverseId(LogInfo& logInfo, std::string_view line, GameSession* currentSession) {
+    void processUniverseId(LogInfo &logInfo, std::string_view line, GameSession *currentSession) {
         if (currentSession == nullptr) {
             return;
         }
@@ -174,7 +179,7 @@ namespace {
         }
     }
 
-    void processServerInfo(LogInfo& logInfo, std::string_view line, GameSession* currentSession) {
+    void processServerInfo(LogInfo &logInfo, std::string_view line, GameSession *currentSession) {
         if (currentSession == nullptr) {
             return;
         }
@@ -209,14 +214,14 @@ namespace {
         }
     }
 
-    void processUserId(LogInfo& logInfo, std::string_view line) {
+    void processUserId(LogInfo &logInfo, std::string_view line) {
         if (!logInfo.userId.empty()) {
             return;
         }
         logInfo.userId = extractToken(line, USER_ID_TOKEN, WHITESPACE);
     }
 
-    void createBackwardCompatSession(LogInfo& logInfo) {
+    void createBackwardCompatSession(LogInfo &logInfo) {
         if (!logInfo.sessions.empty()) {
             return;
         }
@@ -236,34 +241,32 @@ namespace {
         logInfo.sessions.push_back(std::move(session));
     }
 
-    void sortSessions(LogInfo& logInfo) {
-        std::sort(logInfo.sessions.begin(), logInfo.sessions.end(),
-            [](const GameSession& a, const GameSession& b) {
-                return a.timestamp > b.timestamp;
-            });
+    void sortSessions(LogInfo &logInfo) {
+        std::sort(logInfo.sessions.begin(), logInfo.sessions.end(), [](const GameSession &a, const GameSession &b) {
+            return a.timestamp > b.timestamp;
+        });
     }
-}
+} // namespace
 
-std::filesystem::path GetLogsFolder()
-{
+std::filesystem::path GetLogsFolder() {
 #ifdef _WIN32
-	if (const wchar_t* localAppData = _wgetenv(L"LOCALAPPDATA")) {
-		return std::filesystem::path(localAppData) / "Roblox" / "logs";
-	}
+    if (const wchar_t *localAppData = _wgetenv(L"LOCALAPPDATA")) {
+        return std::filesystem::path(localAppData) / "Roblox" / "logs";
+    }
 #elif defined(__APPLE__)
-	if (const char* home = std::getenv("HOME")) {
-		return std::filesystem::path(home) / "Library" / "Logs" / "Roblox";
-	}
+    if (const char *home = std::getenv("HOME")) {
+        return std::filesystem::path(home) / "Library" / "Logs" / "Roblox";
+    }
 #else
-	if (const char* home = std::getenv("HOME")) {
-		return std::filesystem::path(home) / "Roblox" / "logs";
-	}
+    if (const char *home = std::getenv("HOME")) {
+        return std::filesystem::path(home) / "Roblox" / "logs";
+    }
 #endif
 
-	return {};
+    return {};
 }
 
-void parseLogFile(LogInfo& logInfo) {
+void parseLogFile(LogInfo &logInfo) {
     if (logInfo.fileName.find("RobloxPlayerInstaller") != std::string::npos) {
         logInfo.isInstallerLog = true;
         return;
@@ -279,7 +282,7 @@ void parseLogFile(LogInfo& logInfo) {
     fileBuffer.resize(static_cast<size_t>(fileStream.gcount()));
 
     const std::string_view logData(fileBuffer);
-    GameSession* currentSession = nullptr;
+    GameSession *currentSession = nullptr;
     std::string currentTimestamp;
 
     for (size_t pos = 0; pos < logData.size();) {

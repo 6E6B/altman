@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ui/windows/history/history_log_types.h"
 #include <string>
+#include "ui/windows/history/history_log_types.h"
 
 void parseLogFile(LogInfo &logInfo);
 

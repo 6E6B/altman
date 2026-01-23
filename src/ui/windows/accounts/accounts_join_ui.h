@@ -2,10 +2,10 @@
 #include <string>
 
 enum JoinType {
-	PrivateServer = 0,
-	Game = 1,
-	GameServer = 2,
-	User = 3
+    PrivateServer = 0,
+    Game = 1,
+    GameServer = 2,
+    User = 3
 };
 void RenderJoinOptions();
 

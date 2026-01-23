@@ -1,38 +1,40 @@
-#include <unordered_set>
+#include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <filesystem>
-#include <imgui.h>
+#include <format>
+#include <mutex>
 #include <string>
 #include <system_error>
-#include <vector>
-#include <mutex>
-#include <atomic>
 #include <thread>
-#include <chrono>
+#include <unordered_set>
 #include <utility>
-#include <algorithm>
-#include <format>
+#include <vector>
 
+#include <imgui.h>
+
+#include "../accounts/accounts_join_ui.h"
+#include "components/data.h"
+#include "console/console.h"
 #include "history.h"
-#include "ui/windows/history/history_log_types.h"
-#include "ui/windows/history/history_log_parser.h"
 #include "history_utils.h"
+#include "system/roblox_launcher.h"
+#include "ui/widgets/bottom_right_status.h"
+#include "ui/widgets/context_menus.h"
+#include "ui/widgets/modal_popup.h"
+#include "ui/windows/history/history_log_parser.h"
+#include "ui/windows/history/history_log_types.h"
+#include "utils/account_utils.h"
+#include "utils/thread_task.h"
 #include "utils/time_utils.h"
 
-#include "utils/account_utils.h"
-#include "../accounts/accounts_join_ui.h"
-#include "ui/widgets/context_menus.h"
-#include "components/data.h"
-#include "ui/widgets/bottom_right_status.h"
-#include "system/roblox_launcher.h"
-#include "utils/thread_task.h"
-#include "ui/widgets/modal_popup.h"
 #ifdef _WIN32
-    #include <windows.h>
-	#include <shellapi.h>
+#include <windows.h>
+#include <shellapi.h>
 #elif __APPLE__
-	#include <unistd.h>
+#include <unistd.h>
 #endif
-#include "console/console.h"
+
 
 namespace {
     constexpr auto ICON_REFRESH = "\xEF\x8B\xB1 ";
@@ -47,41 +49,33 @@ namespace {
 
     int g_selected_log_idx = -1;
     std::vector<LogInfo> g_logs;
-    std::atomic_bool g_logs_loading{false};
-    std::atomic_bool g_stop_log_watcher{false};
+    std::atomic_bool g_logs_loading {false};
+    std::atomic_bool g_stop_log_watcher {false};
     std::once_flag g_start_log_watcher_once;
     std::mutex g_logs_mtx;
     char g_search_buffer[128] = "";
     std::vector<int> g_filtered_log_indices;
     bool g_search_active = false;
     bool g_should_scroll_to_selection = false;
-}
+} // namespace
 
-static void OpenFileOrFolder(const std::filesystem::path& path)
-{
+static void OpenFileOrFolder(const std::filesystem::path &path) {
 #ifdef _WIN32
-	ShellExecuteW(
-		nullptr,
-		L"open",
-		path.wstring().c_str(),
-		nullptr,
-		nullptr,
-		SW_SHOWNORMAL
-	);
+    ShellExecuteW(nullptr, L"open", path.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 
 #elif defined(__APPLE__)
-	pid_t pid = fork();
-	if (pid == 0) {
-		execl("/usr/bin/open", "open", path.c_str(), (char*)nullptr);
-		_exit(1);
-	}
+    pid_t pid = fork();
+    if (pid == 0) {
+        execl("/usr/bin/open", "open", path.c_str(), (char *) nullptr);
+        _exit(1);
+    }
 
 #else // Linux / BSD
-	pid_t pid = fork();
-	if (pid == 0) {
-		execlp("xdg-open", "xdg-open", path.c_str(), (char*)nullptr);
-		_exit(1);
-	}
+    pid_t pid = fork();
+    if (pid == 0) {
+        execlp("xdg-open", "xdg-open", path.c_str(), (char *) nullptr);
+        _exit(1);
+    }
 #endif
 }
 
@@ -95,28 +89,26 @@ static void openLogsFolder() {
 }
 
 static std::string toLower(std::string str) {
-    std::transform(str.begin(), str.end(), str.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
+    std::transform(str.begin(), str.end(), str.begin(), [](unsigned char c) {
+        return std::tolower(c);
+    });
     return str;
 }
 
-static bool matchesSearch(const LogInfo& log, const std::string& searchTerm) {
-    auto contains = [&searchTerm](const std::string& field) {
+static bool matchesSearch(const LogInfo &log, const std::string &searchTerm) {
+    auto contains = [&searchTerm](const std::string &field) {
         return toLower(field).find(searchTerm) != std::string::npos;
     };
 
-    if (contains(log.fileName) || contains(log.fullPath) ||
-        contains(log.version) || contains(log.placeId) ||
-        contains(log.jobId) || contains(log.universeId) ||
-        contains(log.userId)) {
+    if (contains(log.fileName) || contains(log.fullPath) || contains(log.version) || contains(log.placeId)
+        || contains(log.jobId) || contains(log.universeId) || contains(log.userId)) {
         return true;
     }
 
-    for (const auto& session : log.sessions) {
-        if (searchTerm.find(session.placeId) != std::string::npos ||
-            searchTerm.find(session.jobId) != std::string::npos ||
-            searchTerm.find(session.universeId) != std::string::npos ||
-            searchTerm.find(session.serverIp) != std::string::npos) {
+    for (const auto &session: log.sessions) {
+        if (searchTerm.find(session.placeId) != std::string::npos || searchTerm.find(session.jobId) != std::string::npos
+            || searchTerm.find(session.universeId) != std::string::npos
+            || searchTerm.find(session.serverIp) != std::string::npos) {
             return true;
         }
     }
@@ -142,7 +134,7 @@ static void updateFilteredLogs() {
 
     std::lock_guard<std::mutex> lk(g_logs_mtx);
     for (int i = 0; i < static_cast<int>(g_logs.size()); ++i) {
-        const auto& log = g_logs[i];
+        const auto &log = g_logs[i];
 
         if (log.isInstallerLog) {
             continue;
@@ -154,11 +146,10 @@ static void updateFilteredLogs() {
     }
 
     if (g_selected_log_idx != -1) {
-        bool selectionInFiltered = std::any_of(
-            g_filtered_log_indices.begin(),
-            g_filtered_log_indices.end(),
-            [](int idx) { return idx == g_selected_log_idx; }
-        );
+        bool selectionInFiltered
+            = std::any_of(g_filtered_log_indices.begin(), g_filtered_log_indices.end(), [](int idx) {
+                  return idx == g_selected_log_idx;
+              });
 
         if (!selectionInFiltered) {
             g_selected_log_idx = -1;
@@ -169,7 +160,7 @@ static void updateFilteredLogs() {
 static void clearLogs() {
     auto dir = GetLogsFolder();
     if (!dir.empty() && std::filesystem::exists(dir)) {
-        for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+        for (const auto &entry: std::filesystem::directory_iterator(dir)) {
             if (entry.is_regular_file() && entry.path().extension() == ".log") {
                 std::error_code ec;
                 std::filesystem::remove(entry.path(), ec);
@@ -197,7 +188,7 @@ static void refreshLogs() {
         auto dir = GetLogsFolder();
 
         if (!dir.empty() && std::filesystem::exists(dir)) {
-            for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+            for (const auto &entry: std::filesystem::directory_iterator(dir)) {
                 if (entry.is_regular_file()) {
                     std::string fName = entry.path().filename().string();
                     if (fName.length() > 4 && fName.substr(fName.length() - 4) == ".log") {
@@ -213,10 +204,9 @@ static void refreshLogs() {
             }
         }
 
-        std::sort(tempLogs.begin(), tempLogs.end(),
-                  [](const LogInfo& a, const LogInfo& b) {
-                      return b.timestamp < a.timestamp;
-                  });
+        std::sort(tempLogs.begin(), tempLogs.end(), [](const LogInfo &a, const LogInfo &b) {
+            return b.timestamp < a.timestamp;
+        });
 
         {
             std::lock_guard<std::mutex> lk(g_logs_mtx);
@@ -245,7 +235,7 @@ static void startLogWatcher() {
     refreshLogs();
 }
 
-static void addTableRow(const char* label, const std::string& value, float indent) {
+static void addTableRow(const char *label, const std::string &value, float indent) {
     if (value.empty()) {
         return;
     }
@@ -274,25 +264,21 @@ static void addTableRow(const char* label, const std::string& value, float inden
     ImGui::Unindent(indent);
 }
 
-static float calculateLabelWidth(const std::vector<const char*>& labels) {
+static float calculateLabelWidth(const std::vector<const char *> &labels) {
     float maxWidth = ImGui::GetFontSize() * 6.875f;
-    for (const char* label : labels) {
+    for (const char *label: labels) {
         float width = ImGui::CalcTextSize(label).x;
         maxWidth = std::max(maxWidth, width + ImGui::GetFontSize() * 2.0f);
     }
     return maxWidth;
 }
 
-static void DisplayLogDetails(const LogInfo& logInfo) {
-    ImGuiTableFlags tableFlags = ImGuiTableFlags_BordersInnerH |
-                                 ImGuiTableFlags_RowBg |
-                                 ImGuiTableFlags_SizingFixedFit;
+static void DisplayLogDetails(const LogInfo &logInfo) {
+    ImGuiTableFlags tableFlags = ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit;
 
     ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(0.0f, 4.0f));
 
-    std::vector<const char*> labels = {
-        "File:", "Time:", "Version:", "Channel:", "User ID:"
-    };
+    std::vector<const char *> labels = {"File:", "Time:", "Version:", "Channel:", "User ID:"};
     float historyLabelColumnWidth = calculateLabelWidth(labels);
 
     if (ImGui::BeginTable("HistoryInfoTable", 2, tableFlags)) {
@@ -346,23 +332,16 @@ static void DisplayLogDetails(const LogInfo& logInfo) {
         ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 3.0f);
 
         for (size_t i = 0; i < logInfo.sessions.size(); i++) {
-            const auto& session = logInfo.sessions[i];
+            const auto &session = logInfo.sessions[i];
 
-            std::string sessionTitle = !session.timestamp.empty()
-                ? friendlyTimestamp(session.timestamp)
-                : std::format("Game Instance {}", i + 1);
+            std::string sessionTitle = !session.timestamp.empty() ? friendlyTimestamp(session.timestamp)
+                                                                  : std::format("Game Instance {}", i + 1);
 
             ImGui::PushID(static_cast<int>(i));
 
-            ImVec4 headerColor = (i % 2 == 0)
-                ? ImVec4(0.2f, 0.2f, 0.2f, 0.55f)
-                : ImVec4(0.25f, 0.25f, 0.25f, 0.55f);
-            ImVec4 hoverColor = (i % 2 == 0)
-                ? ImVec4(0.3f, 0.3f, 0.3f, 0.55f)
-                : ImVec4(0.35f, 0.35f, 0.35f, 0.55f);
-            ImVec4 activeColor = (i % 2 == 0)
-                ? ImVec4(0.25f, 0.25f, 0.25f, 0.55f)
-                : ImVec4(0.3f, 0.3f, 0.3f, 0.55f);
+            ImVec4 headerColor = (i % 2 == 0) ? ImVec4(0.2f, 0.2f, 0.2f, 0.55f) : ImVec4(0.25f, 0.25f, 0.25f, 0.55f);
+            ImVec4 hoverColor = (i % 2 == 0) ? ImVec4(0.3f, 0.3f, 0.3f, 0.55f) : ImVec4(0.35f, 0.35f, 0.35f, 0.55f);
+            ImVec4 activeColor = (i % 2 == 0) ? ImVec4(0.25f, 0.25f, 0.25f, 0.55f) : ImVec4(0.3f, 0.3f, 0.3f, 0.55f);
 
             ImGui::PushStyleColor(ImGuiCol_Header, headerColor);
             ImGui::PushStyleColor(ImGuiCol_HeaderHovered, hoverColor);
@@ -372,19 +351,31 @@ static void DisplayLogDetails(const LogInfo& logInfo) {
                 ImGui::PopStyleColor(3);
 
                 if (ImGui::BeginTable("InstanceDetailsTable", 2, ImGuiTableFlags_BordersInnerV)) {
-                    std::vector<const char*> instLabels;
-                    if (!session.placeId.empty()) instLabels.push_back("Place ID:");
-                    if (!session.jobId.empty()) instLabels.push_back("Job ID:");
-                    if (!session.universeId.empty()) instLabels.push_back("Universe ID:");
-                    if (!session.serverIp.empty()) instLabels.push_back("Server IP:");
-                    if (!session.serverPort.empty()) instLabels.push_back("Server Port:");
+                    std::vector<const char *> instLabels;
+                    if (!session.placeId.empty()) {
+                        instLabels.push_back("Place ID:");
+                    }
+                    if (!session.jobId.empty()) {
+                        instLabels.push_back("Job ID:");
+                    }
+                    if (!session.universeId.empty()) {
+                        instLabels.push_back("Universe ID:");
+                    }
+                    if (!session.serverIp.empty()) {
+                        instLabels.push_back("Server IP:");
+                    }
+                    if (!session.serverPort.empty()) {
+                        instLabels.push_back("Server Port:");
+                    }
 
                     float instLabelWidth = calculateLabelWidth(instLabels);
                     ImGui::TableSetupColumn("##field", ImGuiTableColumnFlags_WidthFixed, instLabelWidth);
                     ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch);
 
-                    auto addInstanceRow = [](const char* label, const std::string& value) {
-                        if (value.empty()) return;
+                    auto addInstanceRow = [](const char *label, const std::string &value) {
+                        if (value.empty()) {
+                            return;
+                        }
 
                         ImGui::TableNextRow();
                         ImGui::TableSetColumnIndex(0);
@@ -413,56 +404,68 @@ static void DisplayLogDetails(const LogInfo& logInfo) {
                     ImGui::EndTable();
                 }
 
-                bool canLaunch = !session.placeId.empty() &&
-                               !session.jobId.empty() &&
-                               !g_selectedAccountIds.empty();
+                bool canLaunch = !session.placeId.empty() && !session.jobId.empty() && !g_selectedAccountIds.empty();
 
-            	if (canLaunch) {
-            		ImGui::Spacing();
-            		if (ImGui::Button(std::format("{} Launch Instance##{}", ICON_JOIN, i).c_str())) {
-            			uint64_t place_id_val = 0;
-            			if (session.placeId.find_first_not_of("0123456789") == std::string::npos) {
-            				place_id_val = std::stoull(session.placeId);
-            			}
+                if (canLaunch) {
+                    ImGui::Spacing();
+                    if (ImGui::Button(std::format("{} Launch Instance##{}", ICON_JOIN, i).c_str())) {
+                        uint64_t place_id_val = 0;
+                        if (session.placeId.find_first_not_of("0123456789") == std::string::npos) {
+                            place_id_val = std::stoull(session.placeId);
+                        }
 
-            			if (place_id_val > 0) {
-            				launchWithSelectedAccounts(LaunchParams::gameJob(place_id_val, session.jobId));
-            			} else {
-            				LOG_INFO("Invalid Place ID in instance.");
-            			}
-            		}
+                        if (place_id_val > 0) {
+                            launchWithSelectedAccounts(LaunchParams::gameJob(place_id_val, session.jobId));
+                        } else {
+                            LOG_INFO("Invalid Place ID in instance.");
+                        }
+                    }
 
-            		if (ImGui::BeginPopupContextItem(std::format("LaunchButtonCtx##{}", i).c_str(),
-													 ImGuiPopupFlags_MouseButtonRight)) {
-            			uint64_t pid = 0;
-            			if (session.placeId.find_first_not_of("0123456789") == std::string::npos) {
-            				pid = std::stoull(session.placeId);
-            			}
+                    if (ImGui::BeginPopupContextItem(
+                            std::format("LaunchButtonCtx##{}", i).c_str(),
+                            ImGuiPopupFlags_MouseButtonRight
+                        )) {
+                        uint64_t pid = 0;
+                        if (session.placeId.find_first_not_of("0123456789") == std::string::npos) {
+                            pid = std::stoull(session.placeId);
+                        }
 
-            			StandardJoinMenuParams menu{};
-            			menu.placeId = pid;
-            			if (!session.universeId.empty() &&
-							session.universeId.find_first_not_of("0123456789") == std::string::npos) {
-            				menu.universeId = std::stoull(session.universeId);
-							}
-            			menu.jobId = session.jobId;
+                        StandardJoinMenuParams menu {};
+                        menu.placeId = pid;
+                        if (!session.universeId.empty()
+                            && session.universeId.find_first_not_of("0123456789") == std::string::npos) {
+                            menu.universeId = std::stoull(session.universeId);
+                        }
+                        menu.jobId = session.jobId;
 
-            			menu.onLaunchGame = [pid]() {
-            				if (pid == 0) return;
-            				launchWithSelectedAccounts(LaunchParams::standard(pid));
-            			};
+                        menu.onLaunchGame = [pid]() {
+                            if (pid == 0) {
+                                return;
+                            }
+                            launchWithSelectedAccounts(LaunchParams::standard(pid));
+                        };
 
-            			menu.onLaunchInstance = [pid, jid = session.jobId]() {
-            				if (pid == 0 || jid.empty()) return;
-            				launchWithSelectedAccounts(LaunchParams::gameJob(pid, jid));
-            			};
+                        menu.onLaunchInstance = [pid, jid = session.jobId]() {
+                            if (pid == 0 || jid.empty()) {
+                                return;
+                            }
+                            launchWithSelectedAccounts(LaunchParams::gameJob(pid, jid));
+                        };
 
-            			menu.onFillGame = [pid]() { if (pid) FillJoinOptions(pid, ""); };
-            			menu.onFillInstance = [pid, jid = session.jobId]() { if (pid) FillJoinOptions(pid, jid); };
-            			RenderStandardJoinMenu(menu);
-            			ImGui::EndPopup();
-													 }
-            	}
+                        menu.onFillGame = [pid]() {
+                            if (pid) {
+                                FillJoinOptions(pid, "");
+                            }
+                        };
+                        menu.onFillInstance = [pid, jid = session.jobId]() {
+                            if (pid) {
+                                FillJoinOptions(pid, jid);
+                            }
+                        };
+                        RenderStandardJoinMenu(menu);
+                        ImGui::EndPopup();
+                    }
+                }
 
                 ImGui::TreePop();
             } else {
@@ -525,8 +528,11 @@ void RenderHistoryTab() {
     }
 
     if (g_search_active) {
-        ImGui::TextColored(ImVec4(0.0f, 0.8f, 1.0f, 1.0f), "%s",
-            std::format("Found {} matching logs", g_filtered_log_indices.size()).c_str());
+        ImGui::TextColored(
+            ImVec4(0.0f, 0.8f, 1.0f, 1.0f),
+            "%s",
+            std::format("Found {} matching logs", g_filtered_log_indices.size()).c_str()
+        );
     }
 
     ImGui::Separator();
@@ -546,7 +552,7 @@ void RenderHistoryTab() {
         std::string lastDay;
         bool indented = false;
 
-        const std::vector<int>& indices = g_search_active ? g_filtered_log_indices : std::vector<int>();
+        const std::vector<int> &indices = g_search_active ? g_filtered_log_indices : std::vector<int>();
         int numLogsToDisplay = g_search_active ? static_cast<int>(indices.size()) : static_cast<int>(g_logs.size());
 
         auto getLogIndex = [&](int i) -> int {
@@ -560,15 +566,13 @@ void RenderHistoryTab() {
 
         for (int i = 0; i < numLogsToDisplay; ++i) {
             int logIndex = getLogIndex(i);
-            const auto& logInfo = g_logs[logIndex];
+            const auto &logInfo = g_logs[logIndex];
 
             if (logInfo.isInstallerLog) {
                 continue;
             }
 
-            std::string thisDay = logInfo.timestamp.size() >= 10
-                ? logInfo.timestamp.substr(0, 10)
-                : "Unknown";
+            std::string thisDay = logInfo.timestamp.size() >= 10 ? logInfo.timestamp.substr(0, 10) : "Unknown";
 
             if (thisDay != lastDay) {
                 if (indented) {
@@ -616,7 +620,7 @@ void RenderHistoryTab() {
     if (g_selected_log_idx >= 0) {
         std::lock_guard<std::mutex> lk(g_logs_mtx);
         if (g_selected_log_idx < static_cast<int>(g_logs.size())) {
-            const auto& logInfo = g_logs[g_selected_log_idx];
+            const auto &logInfo = g_logs[g_selected_log_idx];
 
             float contentHeight = ImGui::GetContentRegionAvail().y;
             float buttonHeight = ImGui::GetFrameHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y * 2;
