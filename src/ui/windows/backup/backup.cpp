@@ -252,48 +252,64 @@ namespace Backup {
             return std::unexpected(Error::InvalidFormat);
         }
 
-        std::vector<AccountData> imported;
-        imported.reserve((*j)["accounts"].size());
+        std::vector<std::future<std::optional<AccountData>>> futures;
+        futures.reserve((*j)["accounts"].size());
 
-        for (const auto &item: (*j)["accounts"]) {
+        for (const auto &item : (*j)["accounts"]) {
             if (!item.is_object()) {
                 continue;
             }
 
-            AccountData acct;
-            acct.id = item.value("id", static_cast<std::uint64_t>(0));
-            acct.cookie = item.value("cookie", "");
-            acct.note = item.value("note", "");
-            acct.isFavorite = item.value("isFavorite", false);
-
-            if (acct.cookie.empty()) {
+            std::string cookie = item.value("cookie", "");
+            if (cookie.empty()) {
                 continue;
             }
 
-            if (Roblox::cachedBanStatus(acct.cookie) == Roblox::BanCheckResult::InvalidCookie) {
-                LOG_WARN("Skipping invalid cookie during import (ID: {})", acct.id);
-                continue;
+            std::string note = item.value("note", "");
+            bool isFavorite = item.value("isFavorite", false);
+            std::uint64_t id = item.value("id", static_cast<std::uint64_t>(0));
+
+            futures.push_back(std::async(std::launch::async, [=]() -> std::optional<AccountData> {
+                if (Roblox::cachedBanStatus(cookie) == Roblox::BanCheckResult::InvalidCookie) {
+                    LOG_WARN("Skipping invalid cookie during import (ID: {})", id);
+                    return std::nullopt;
+                }
+
+                std::uint64_t uid = Roblox::getUserId(cookie);
+                std::string username = Roblox::getUsername(cookie);
+                std::string displayName = Roblox::getDisplayName(cookie);
+
+                if (uid == 0 || username.empty() || displayName.empty()) {
+                    LOG_WARN("Skipping account with invalid user data (ID: {})", id);
+                    return std::nullopt;
+                }
+
+                AccountData acct;
+                acct.id = id;
+                acct.cookie = cookie;
+                acct.note = note;
+                acct.isFavorite = isFavorite;
+                acct.userId = std::to_string(uid);
+                acct.username = std::move(username);
+                acct.displayName = std::move(displayName);
+
+                acct.status = Roblox::getPresence(cookie, uid);
+
+                auto vs = Roblox::getVoiceChatStatus(cookie);
+                acct.voiceStatus = vs.status;
+                acct.voiceBanExpiry = vs.bannedUntil;
+
+                return acct;
+            }));
+        }
+
+        std::vector<AccountData> imported;
+        imported.reserve(futures.size());
+
+        for (auto &fut : futures) {
+            if (auto result = fut.get()) {
+                imported.push_back(std::move(*result));
             }
-
-            std::uint64_t uid = Roblox::getUserId(acct.cookie);
-            std::string username = Roblox::getUsername(acct.cookie);
-            std::string displayName = Roblox::getDisplayName(acct.cookie);
-
-            if (uid == 0 || username.empty() || displayName.empty()) {
-                LOG_WARN("Skipping account with invalid user data (ID: {})", acct.id);
-                continue;
-            }
-
-            acct.userId = std::to_string(uid);
-            acct.username = std::move(username);
-            acct.displayName = std::move(displayName);
-
-            acct.status = Roblox::getPresence(acct.cookie, uid);
-            auto vs = Roblox::getVoiceChatStatus(acct.cookie);
-            acct.voiceStatus = vs.status;
-            acct.voiceBanExpiry = vs.bannedUntil;
-
-            imported.push_back(std::move(acct));
         }
 
         if (imported.empty()) {
@@ -301,7 +317,7 @@ namespace Backup {
         }
 
         {
-            std::shared_lock lock(g_accountsMutex);
+            std::unique_lock lock(g_accountsMutex);
             g_accounts = std::move(imported);
             invalidateAccountIndex();
         }
