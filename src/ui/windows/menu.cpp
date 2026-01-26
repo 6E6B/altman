@@ -9,12 +9,6 @@
 
 #include <imgui.h>
 
-#ifdef _WIN32
-#include <windows.h>
-#include <shlobj.h>
-#include <tlhelp32.h>
-#endif
-
 #include "components.h"
 #include "console/console.h"
 #include "data.h"
