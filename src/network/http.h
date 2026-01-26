@@ -44,6 +44,8 @@ namespace HttpClient {
             std::string error;
     };
 
+    nlohmann::json decode(const Response &response);
+
     std::string build_kv_string(std::initializer_list<std::pair<const std::string, std::string>> items, char sep = '&');
 
     Response
@@ -60,6 +62,11 @@ namespace HttpClient {
         bool follow_redirects = true,
         int max_redirects = 10);
 
+    Response rateLimitedGet(
+        const std::string &url,
+        const std::vector<std::pair<std::string, std::string>> &headers = {}
+    );
+
     BinaryResponse get_binary(
         const std::string &url,
         std::initializer_list<std::pair<const std::string, std::string>> headers = {},
@@ -75,6 +82,21 @@ namespace HttpClient {
         std::initializer_list<std::pair<const std::string, std::string>> form = {},
         bool follow_redirects = true,
         int max_redirects = 10
+    );
+
+    Response post(
+        const std::string &url,
+        std::span<const std::pair<std::string, std::string>> headers,
+        const std::string &jsonBody = std::string(),
+        std::initializer_list<std::pair<const std::string, std::string>> form = {},
+        bool follow_redirects = true,
+        int max_redirects = 10
+    );
+
+    Response rateLimitedPost(
+        const std::string &url,
+        const std::vector<std::pair<std::string, std::string>> &headers,
+        const std::string &body = {}
     );
 
     bool download(
@@ -96,7 +118,7 @@ namespace HttpClient {
     class DownloadSession {
         private:
             class Impl;
-            std::unique_ptr<Impl> impl_;
+            std::unique_ptr<Impl> m_impl;
 
         public:
             DownloadSession();
@@ -113,6 +135,70 @@ namespace HttpClient {
             bool download_to_file(const std::string &output_path, ProgressCallback progress_cb = nullptr);
     };
 
-    nlohmann::json decode(const Response &response);
+    class RateLimiter {
+        public:
+            using Clock = std::chrono::steady_clock;
+            using Duration = std::chrono::milliseconds;
+
+            static RateLimiter &instance();
+
+            void configure(int maxRequests, Duration windowSize);
+
+            void acquire();
+
+            bool tryAcquire();
+
+            int available() const;
+
+            int maxRequests() const { return m_maxRequests; }
+            Duration windowSize() const { return m_windowSize; }
+
+            // Temporarily back off after receiving a 429
+            // Adds extra delay before next request
+            void backoff(Duration duration = std::chrono::seconds(2));
+
+        private:
+            RateLimiter();
+
+            void pruneOldRequests() const;
+
+            mutable std::mutex m_mutex;
+            std::condition_variable m_cv;
+
+            int m_maxRequests = 50;
+            Duration m_windowSize = std::chrono::milliseconds(1000);
+
+            mutable std::deque<Clock::time_point> m_requestTimestamps;
+            Clock::time_point m_backoffUntil = Clock::time_point::min();
+    };
+
+    // Wraps an HTTP request with rate limiting and retry logic for 429s
+    template <typename Func>
+    auto rateLimitedRequest(Func &&requestFunc, int maxRetries = 3) -> decltype(requestFunc()) {
+        auto &limiter = RateLimiter::instance();
+
+        for (int attempt = 0; attempt <= maxRetries; ++attempt) {
+            limiter.acquire();
+
+            auto response = requestFunc();
+
+            // Check if response indicates rate limiting
+            if constexpr (std::is_same_v<decltype(response), Response>) {
+                if (response.status_code == 429) {
+                    if (attempt < maxRetries) {
+                        // Exponential backoff: 1s, 2s, 4s
+                        auto delay = std::chrono::seconds(1 << attempt);
+                        limiter.backoff(std::chrono::duration_cast<RateLimiter::Duration>(delay));
+                        continue;
+                    }
+                }
+            }
+
+            return response;
+        }
+
+        // Should not reach here, but return last attempt
+        return requestFunc();
+    }
 
 } // namespace HttpClient

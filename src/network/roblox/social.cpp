@@ -5,10 +5,10 @@
 #include <condition_variable>
 #include <format>
 #include <mutex>
-#include <unordered_map>
 
 #include <nlohmann/json.hpp>
 
+#include "common.h"
 #include "auth.h"
 #include "console/console.h"
 #include "network/http.h"
@@ -17,63 +17,20 @@
 
 namespace Roblox {
 
-    namespace {
-        bool json_to_string(const nlohmann::json &j, std::string &out) {
-            if (j.is_string()) {
-                out = j.get_ref<const std::string &>();
-                return true;
-            }
-            if (j.is_number_integer()) {
-                out = std::to_string(j.get<int64_t>());
-                return true;
-            }
-            if (j.is_number_unsigned()) {
-                out = std::to_string(j.get<uint64_t>());
-                return true;
-            }
-            return false;
-        }
-
-        bool json_to_u64(const nlohmann::json &j, uint64_t &out) {
-            if (j.is_number_unsigned()) {
-                out = j.get<uint64_t>();
-                return true;
-            }
-            if (j.is_number_integer()) {
-                int64_t v = j.get<int64_t>();
-                if (v >= 0) {
-                    out = static_cast<uint64_t>(v);
-                    return true;
-                }
-            }
-            if (j.is_string()) {
-                const auto &s = j.get_ref<const std::string &>();
-                uint64_t v = 0;
-                auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), v);
-                if (ec == std::errc {}) {
-                    out = v;
-                    return true;
-                }
-            }
-            return false;
-        }
-    } // namespace
-
     std::vector<FriendInfo> getFriends(const std::string &userId, const std::string &cookie) {
         if (!canUseCookie(cookie)) {
             return {};
         }
 
-        LOG_INFO("Fetching friends list using new API");
+        LOG_INFO("Fetching friends list");
 
         HttpClient::Response resp = HttpClient::get(
             "https://friends.roblox.com/v1/users/" + userId + "/friends",
             {
-                {"Cookie",     ".ROBLOSECURITY=" + cookie                                                                         },
-                {"User-Agent",
-                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
-                {"Accept",     "application/json"                                                                                 }
-        }
+                {"Cookie",     ".ROBLOSECURITY=" + cookie                                        },
+                {"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"    },
+                {"Accept",     "application/json"                                                }
+            }
         );
 
         if (resp.status_code < 200 || resp.status_code >= 300) {
@@ -100,9 +57,10 @@ namespace Roblox {
             return friends;
         }
 
-        const size_t BATCH_SIZE = 100;
+        constexpr size_t BATCH_SIZE = 100;
         for (size_t i = 0; i < friendIds.size(); i += BATCH_SIZE) {
             size_t end = std::min(i + BATCH_SIZE, friendIds.size());
+
             nlohmann::json requestBody = {
                 {"fields",  {"names.combinedName", "names.username", "names.displayName"}},
                 {"userIds", nlohmann::json::array()                                      }
@@ -112,15 +70,9 @@ namespace Roblox {
                 requestBody["userIds"].push_back(friendIds[j]);
             }
 
-            HttpClient::Response profileResp = HttpClient::post(
+            HttpClient::Response profileResp = authenticatedPost(
                 "https://apis.roblox.com/user-profile-api/v1/user/profiles/get-profiles",
-                {
-                    {"Cookie",       ".ROBLOSECURITY=" + cookie                                                                       },
-                    {"User-Agent",
-                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
-                    {"Accept",       "application/json"                                                                               },
-                    {"Content-Type", "application/json"                                                                               }
-            },
+                cookie,
                 requestBody.dump()
             );
 
@@ -163,13 +115,24 @@ namespace Roblox {
         return friends;
     }
 
+    ApiResult<std::vector<FriendInfo>> getFriendsList(const std::string &userId, const std::string &cookie) {
+        ApiError validationError = validateCookieForRequest(cookie);
+        if (validationError != ApiError::Success) {
+            return std::unexpected(validationError);
+        }
+
+        auto friends = getFriends(userId, cookie);
+        return friends;
+    }
+
     FriendInfo getUserInfo(const std::string &userId) {
-        LOG_INFO("Fetching user info");
+        LOG_INFO("Fetching user info for {}", userId);
+
         HttpClient::Response resp = HttpClient::get(
             "https://users.roblox.com/v1/users/" + userId,
             {
                 {"Accept", "application/json"}
-        }
+            }
         );
 
         if (resp.status_code < 200 || resp.status_code >= 300) {
@@ -185,6 +148,14 @@ namespace Roblox {
             f.displayName = j.value("displayName", "");
         }
         return f;
+    }
+
+    ApiResult<FriendInfo> getUserInfoResult(const std::string &userId) {
+        auto info = getUserInfo(userId);
+        if (info.id == 0) {
+            return std::unexpected(ApiError::NotFound);
+        }
+        return info;
     }
 
     FriendDetail getUserDetails(const std::string &userId, const std::string &cookie) {
@@ -209,7 +180,7 @@ namespace Roblox {
                 "https://users.roblox.com/v1/users/" + userId,
                 {
                     {"Accept", "application/json"}
-            }
+                }
             );
             if (resp.status_code >= 200 && resp.status_code < 300) {
                 nlohmann::json j = HttpClient::decode(resp);
@@ -228,7 +199,7 @@ namespace Roblox {
                 try {
                     d.followers = nlohmann::json::parse(resp.text).value("count", 0);
                 } catch (const std::exception &e) {
-                    LOG_ERROR(std::string("Failed to parse followers count: ") + e.what());
+                    LOG_ERROR("Failed to parse followers count: {}", e.what());
                 }
             }
             signalDone();
@@ -240,7 +211,7 @@ namespace Roblox {
                 try {
                     d.following = nlohmann::json::parse(resp.text).value("count", 0);
                 } catch (const std::exception &e) {
-                    LOG_ERROR(std::string("Failed to parse following count: ") + e.what());
+                    LOG_ERROR("Failed to parse following count: {}", e.what());
                 }
             }
             signalDone();
@@ -252,7 +223,7 @@ namespace Roblox {
                 try {
                     d.friends = nlohmann::json::parse(resp.text).value("count", 0);
                 } catch (const std::exception &e) {
-                    LOG_ERROR(std::string("Failed to parse friends count: ") + e.what());
+                    LOG_ERROR("Failed to parse friends count: {}", e.what());
                 }
             }
             signalDone();
@@ -264,6 +235,55 @@ namespace Roblox {
         });
 
         return d;
+    }
+
+    ApiResult<FriendDetail> getUserDetailsResult(const std::string &userId, const std::string &cookie) {
+        ApiError validationError = validateCookieForRequest(cookie);
+        if (validationError != ApiError::Success) {
+            return std::unexpected(validationError);
+        }
+
+        auto details = getUserDetails(userId, cookie);
+        if (details.id == 0) {
+            return std::unexpected(ApiError::NotFound);
+        }
+        return details;
+    }
+
+    uint64_t getUserIdFromUsername(const std::string &username) {
+        nlohmann::json payload = {
+            {"usernames",          {username}},
+            {"excludeBannedUsers", true      }
+        };
+
+        auto resp = HttpClient::post(
+            "https://users.roblox.com/v1/usernames/users",
+            {
+                {"Content-Type", "application/json"}
+            },
+            payload.dump()
+        );
+
+        if (resp.status_code < 200 || resp.status_code >= 300) {
+            LOG_ERROR("Username lookup failed: HTTP {}", resp.status_code);
+            return 0;
+        }
+
+        auto j = HttpClient::decode(resp);
+        if (!j.contains("data") || j["data"].empty()) {
+            LOG_ERROR("Username not found: {}", username);
+            return 0;
+        }
+
+        return j["data"][0].value("id", 0ULL);
+    }
+
+    ApiResult<uint64_t> getUserIdFromUsernameResult(const std::string &username) {
+        uint64_t id = getUserIdFromUsername(username);
+        if (id == 0) {
+            return std::unexpected(ApiError::NotFound);
+        }
+        return id;
     }
 
     FriendRequestsPage getIncomingFriendRequests(const std::string &cookie, const std::string &cursor, int limit) {
@@ -283,7 +303,7 @@ namespace Roblox {
                 {"Cookie",     ".ROBLOSECURITY=" + cookie},
                 {"User-Agent", "Mozilla/5.0"             },
                 {"Accept",     "application/json"        }
-        }
+            }
         );
 
         if (resp.status_code < 200 || resp.status_code >= 300) {
@@ -320,7 +340,7 @@ namespace Roblox {
             IncomingFriendRequest r;
 
             if (it.contains("id")) {
-                if (!json_to_u64(it["id"], r.userId)) {
+                if (!jsonToU64(it["id"], r.userId)) {
                     continue;
                 }
                 userIds.push_back(r.userId);
@@ -336,11 +356,11 @@ namespace Roblox {
                 }
 
                 if (fr.contains("originSourceType")) {
-                    json_to_string(fr["originSourceType"], r.originSourceType);
+                    jsonToString(fr["originSourceType"], r.originSourceType);
                 }
 
                 if (fr.contains("sourceUniverseId")) {
-                    json_to_u64(fr["sourceUniverseId"], r.sourceUniverseId);
+                    jsonToU64(fr["sourceUniverseId"], r.sourceUniverseId);
                 }
             }
 
@@ -359,20 +379,6 @@ namespace Roblox {
             return page;
         }
 
-        std::string csrf;
-        {
-            auto r = HttpClient::post(
-                "https://apis.roblox.com/user-profile-api/v1/user/profiles/get-profiles",
-                {
-                    {"Cookie", ".ROBLOSECURITY=" + cookie}
-            }
-            );
-            auto it = r.headers.find("x-csrf-token");
-            if (it != r.headers.end()) {
-                csrf = it->second;
-            }
-        }
-
         constexpr size_t BATCH = 100;
         for (size_t i = 0; i < userIds.size(); i += BATCH) {
             size_t end = std::min(i + BATCH, userIds.size());
@@ -381,18 +387,13 @@ namespace Roblox {
             body["userIds"] = nlohmann::json::array();
             body["fields"] = {"names.combinedName", "names.username", "isVerified", "isDeleted"};
 
-            for (size_t j = i; j < end; ++j) {
-                body["userIds"].push_back(userIds[j]);
+            for (size_t k = i; k < end; ++k) {
+                body["userIds"].push_back(userIds[k]);
             }
 
-            HttpClient::Response pr = HttpClient::post(
+            HttpClient::Response pr = authenticatedPost(
                 "https://apis.roblox.com/user-profile-api/v1/user/profiles/get-profiles",
-                {
-                    {"Cookie",       ".ROBLOSECURITY=" + cookie},
-                    {"Content-Type", "application/json"        },
-                    {"Accept",       "application/json"        },
-                    {"X-CSRF-TOKEN", csrf                      }
-            },
+                cookie,
                 body.dump()
             );
 
@@ -416,7 +417,7 @@ namespace Roblox {
                 }
 
                 uint64_t uid {};
-                if (!p.contains("userId") || !json_to_u64(p["userId"], uid)) {
+                if (!p.contains("userId") || !jsonToU64(p["userId"], uid)) {
                     continue;
                 }
 
@@ -458,29 +459,7 @@ namespace Roblox {
 
         std::string url = "https://friends.roblox.com/v1/users/" + targetUserId + "/accept-friend-request";
 
-        auto csrfResp = HttpClient::post(
-            url,
-            {
-                {"Cookie", ".ROBLOSECURITY=" + cookie}
-        }
-        );
-        auto it = csrfResp.headers.find("x-csrf-token");
-        if (it == csrfResp.headers.end()) {
-            if (outResponse) {
-                *outResponse = "Missing CSRF token";
-            }
-            return false;
-        }
-
-        auto resp = HttpClient::post(
-            url,
-            {
-                {"Cookie",       ".ROBLOSECURITY=" + cookie},
-                {"Origin",       "https://www.roblox.com"  },
-                {"Referer",      "https://www.roblox.com/" },
-                {"X-CSRF-TOKEN", it->second                }
-        }
-        );
+        auto resp = authenticatedPost(url, cookie);
 
         if (outResponse) {
             *outResponse = resp.text;
@@ -488,26 +467,20 @@ namespace Roblox {
         return resp.status_code >= 200 && resp.status_code < 300;
     }
 
-    uint64_t getUserIdFromUsername(const std::string &username) {
-        nlohmann::json payload = {
-            {"usernames",          {username}},
-            {"excludeBannedUsers", true      }
-        };
-
-        auto resp = HttpClient::post("https://users.roblox.com/v1/usernames/users", {}, payload.dump());
-
-        if (resp.status_code < 200 || resp.status_code >= 300) {
-            LOG_ERROR("Username lookup failed: HTTP {}", resp.status_code);
-            return 0;
+    SocialActionResult acceptFriendRequestResult(const std::string &targetUserId, const std::string &cookie) {
+        ApiError validationError = validateCookieForRequest(cookie);
+        if (validationError != ApiError::Success) {
+            return {false, std::string(apiErrorToString(validationError)), validationError};
         }
 
-        auto j = HttpClient::decode(resp);
-        if (!j.contains("data") || j["data"].empty()) {
-            LOG_ERROR("Username not found");
-            return 0;
+        std::string url = "https://friends.roblox.com/v1/users/" + targetUserId + "/accept-friend-request";
+        auto resp = authenticatedPost(url, cookie);
+
+        if (resp.status_code >= 200 && resp.status_code < 300) {
+            return {true, "Friend request accepted", ApiError::Success};
         }
 
-        return j["data"][0].value("id", 0ULL);
+        return {false, resp.text, httpStatusToError(resp.status_code)};
     }
 
     bool sendFriendRequest(const std::string &targetUserId, const std::string &cookie, std::string *outResponse) {
@@ -520,35 +493,11 @@ namespace Roblox {
 
         std::string url = "https://friends.roblox.com/v1/users/" + targetUserId + "/request-friendship";
 
-        auto csrfResp = HttpClient::post(
-            url,
-            {
-                {"Cookie", ".ROBLOSECURITY=" + cookie}
-        }
-        );
-        auto it = csrfResp.headers.find("x-csrf-token");
-        if (it == csrfResp.headers.end()) {
-            if (outResponse) {
-                *outResponse = "Missing CSRF token";
-            }
-            LOG_ERROR("Friend request: missing CSRF token");
-            return false;
-        }
-
         nlohmann::json body = {
             {"friendshipOriginSourceType", 0}
         };
 
-        auto resp = HttpClient::post(
-            url,
-            {
-                {"Cookie",       ".ROBLOSECURITY=" + cookie},
-                {"Origin",       "https://www.roblox.com"  },
-                {"Referer",      "https://www.roblox.com/" },
-                {"X-CSRF-TOKEN", it->second                }
-        },
-            body.dump()
-        );
+        auto resp = authenticatedPost(url, cookie, body.dump());
 
         if (outResponse) {
             *outResponse = resp.text;
@@ -569,6 +518,29 @@ namespace Roblox {
         return success;
     }
 
+    SocialActionResult sendFriendRequestResult(const std::string &targetUserId, const std::string &cookie) {
+        ApiError validationError = validateCookieForRequest(cookie);
+        if (validationError != ApiError::Success) {
+            return {false, std::string(apiErrorToString(validationError)), validationError};
+        }
+
+        std::string url = "https://friends.roblox.com/v1/users/" + targetUserId + "/request-friendship";
+
+        nlohmann::json body = {
+            {"friendshipOriginSourceType", 0}
+        };
+
+        auto resp = authenticatedPost(url, cookie, body.dump());
+
+        if (resp.status_code < 200 || resp.status_code >= 300) {
+            return {false, resp.text, httpStatusToError(resp.status_code)};
+        }
+
+        auto j = HttpClient::decode(resp);
+        bool success = j.value("success", false);
+        return {success, resp.text, success ? ApiError::Success : ApiError::Unknown};
+    }
+
     bool unfriend(const std::string &targetUserId, const std::string &cookie, std::string *outResponse) {
         if (!canUseCookie(cookie)) {
             if (outResponse) {
@@ -578,30 +550,7 @@ namespace Roblox {
         }
 
         std::string url = "https://friends.roblox.com/v1/users/" + targetUserId + "/unfriend";
-
-        auto csrfResp = HttpClient::post(
-            url,
-            {
-                {"Cookie", ".ROBLOSECURITY=" + cookie}
-        }
-        );
-        auto it = csrfResp.headers.find("x-csrf-token");
-        if (it == csrfResp.headers.end()) {
-            if (outResponse) {
-                *outResponse = "Missing CSRF token";
-            }
-            return false;
-        }
-
-        auto resp = HttpClient::post(
-            url,
-            {
-                {"Cookie",       ".ROBLOSECURITY=" + cookie},
-                {"Origin",       "https://www.roblox.com"  },
-                {"Referer",      "https://www.roblox.com/" },
-                {"X-CSRF-TOKEN", it->second                }
-        }
-        );
+        auto resp = authenticatedPost(url, cookie);
 
         if (outResponse) {
             *outResponse = resp.text;
@@ -615,6 +564,22 @@ namespace Roblox {
         return true;
     }
 
+    SocialActionResult unfriendResult(const std::string &targetUserId, const std::string &cookie) {
+        ApiError validationError = validateCookieForRequest(cookie);
+        if (validationError != ApiError::Success) {
+            return {false, std::string(apiErrorToString(validationError)), validationError};
+        }
+
+        std::string url = "https://friends.roblox.com/v1/users/" + targetUserId + "/unfriend";
+        auto resp = authenticatedPost(url, cookie);
+
+        if (resp.status_code >= 200 && resp.status_code < 300) {
+            return {true, "Unfriended successfully", ApiError::Success};
+        }
+
+        return {false, resp.text, httpStatusToError(resp.status_code)};
+    }
+
     bool followUser(const std::string &targetUserId, const std::string &cookie, std::string *outResponse) {
         if (!canUseCookie(cookie)) {
             if (outResponse) {
@@ -624,35 +589,28 @@ namespace Roblox {
         }
 
         std::string url = "https://friends.roblox.com/v1/users/" + targetUserId + "/follow";
-
-        auto csrfResp = HttpClient::post(
-            url,
-            {
-                {"Cookie", ".ROBLOSECURITY=" + cookie}
-        }
-        );
-        auto it = csrfResp.headers.find("x-csrf-token");
-        if (it == csrfResp.headers.end()) {
-            if (outResponse) {
-                *outResponse = "Missing CSRF token";
-            }
-            return false;
-        }
-
-        auto resp = HttpClient::post(
-            url,
-            {
-                {"Cookie",       ".ROBLOSECURITY=" + cookie},
-                {"Origin",       "https://www.roblox.com"  },
-                {"Referer",      "https://www.roblox.com/" },
-                {"X-CSRF-TOKEN", it->second                }
-        }
-        );
+        auto resp = authenticatedPost(url, cookie);
 
         if (outResponse) {
             *outResponse = resp.text;
         }
         return resp.status_code >= 200 && resp.status_code < 300;
+    }
+
+    SocialActionResult followUserResult(const std::string &targetUserId, const std::string &cookie) {
+        ApiError validationError = validateCookieForRequest(cookie);
+        if (validationError != ApiError::Success) {
+            return {false, std::string(apiErrorToString(validationError)), validationError};
+        }
+
+        std::string url = "https://friends.roblox.com/v1/users/" + targetUserId + "/follow";
+        auto resp = authenticatedPost(url, cookie);
+
+        if (resp.status_code >= 200 && resp.status_code < 300) {
+            return {true, "Followed successfully", ApiError::Success};
+        }
+
+        return {false, resp.text, httpStatusToError(resp.status_code)};
     }
 
     bool unfollowUser(const std::string &targetUserId, const std::string &cookie, std::string *outResponse) {
@@ -664,35 +622,28 @@ namespace Roblox {
         }
 
         std::string url = "https://friends.roblox.com/v1/users/" + targetUserId + "/unfollow";
-
-        auto csrfResp = HttpClient::post(
-            url,
-            {
-                {"Cookie", ".ROBLOSECURITY=" + cookie}
-        }
-        );
-        auto it = csrfResp.headers.find("x-csrf-token");
-        if (it == csrfResp.headers.end()) {
-            if (outResponse) {
-                *outResponse = "Missing CSRF token";
-            }
-            return false;
-        }
-
-        auto resp = HttpClient::post(
-            url,
-            {
-                {"Cookie",       ".ROBLOSECURITY=" + cookie},
-                {"Origin",       "https://www.roblox.com"  },
-                {"Referer",      "https://www.roblox.com/" },
-                {"X-CSRF-TOKEN", it->second                }
-        }
-        );
+        auto resp = authenticatedPost(url, cookie);
 
         if (outResponse) {
             *outResponse = resp.text;
         }
         return resp.status_code >= 200 && resp.status_code < 300;
+    }
+
+    SocialActionResult unfollowUserResult(const std::string &targetUserId, const std::string &cookie) {
+        ApiError validationError = validateCookieForRequest(cookie);
+        if (validationError != ApiError::Success) {
+            return {false, std::string(apiErrorToString(validationError)), validationError};
+        }
+
+        std::string url = "https://friends.roblox.com/v1/users/" + targetUserId + "/unfollow";
+        auto resp = authenticatedPost(url, cookie);
+
+        if (resp.status_code >= 200 && resp.status_code < 300) {
+            return {true, "Unfollowed successfully", ApiError::Success};
+        }
+
+        return {false, resp.text, httpStatusToError(resp.status_code)};
     }
 
     bool blockUser(const std::string &targetUserId, const std::string &cookie, std::string *outResponse) {
@@ -704,42 +655,28 @@ namespace Roblox {
         }
 
         std::string url = "https://www.roblox.com/users/" + targetUserId + "/block";
-
-        auto csrfResp = HttpClient::post(
-            url,
-            {
-                {"Cookie", ".ROBLOSECURITY=" + cookie}
-        }
-        );
-        if (csrfResp.status_code < 200 || csrfResp.status_code >= 300) {
-            if (outResponse) {
-                *outResponse = "Failed CSRF";
-            }
-            return false;
-        }
-
-        auto it = csrfResp.headers.find("x-csrf-token");
-        if (it == csrfResp.headers.end()) {
-            if (outResponse) {
-                *outResponse = "Missing CSRF token";
-            }
-            return false;
-        }
-
-        auto resp = HttpClient::post(
-            url,
-            {
-                {"Cookie",       ".ROBLOSECURITY=" + cookie},
-                {"Origin",       "https://www.roblox.com"  },
-                {"Referer",      "https://www.roblox.com/" },
-                {"X-CSRF-TOKEN", it->second                }
-        }
-        );
+        auto resp = authenticatedPost(url, cookie);
 
         if (outResponse) {
             *outResponse = resp.text;
         }
         return resp.status_code >= 200 && resp.status_code < 300;
+    }
+
+    SocialActionResult blockUserResult(const std::string &targetUserId, const std::string &cookie) {
+        ApiError validationError = validateCookieForRequest(cookie);
+        if (validationError != ApiError::Success) {
+            return {false, std::string(apiErrorToString(validationError)), validationError};
+        }
+
+        std::string url = "https://www.roblox.com/users/" + targetUserId + "/block";
+        auto resp = authenticatedPost(url, cookie);
+
+        if (resp.status_code >= 200 && resp.status_code < 300) {
+            return {true, "Blocked successfully", ApiError::Success};
+        }
+
+        return {false, resp.text, httpStatusToError(resp.status_code)};
     }
 
 } // namespace Roblox

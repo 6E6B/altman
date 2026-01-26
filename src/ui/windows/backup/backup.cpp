@@ -1,7 +1,18 @@
 #include "backup.h"
+
+#include <ctime>
+#include <filesystem>
+#include <fstream>
+#include <future>
+#include <mutex>
+#include <vector>
+
+#include <nlohmann/json.hpp>
+
 #include "console/console.h"
 #include "crypto.h"
 #include "data.h"
+#include "network/roblox/common.h"
 #include "network/roblox/auth.h"
 #include "network/roblox/common.h"
 #include "network/roblox/games.h"
@@ -11,13 +22,6 @@
 #include "ui/widgets/modal_popup.h"
 #include "utils/paths.h"
 #include "utils/thread_task.h"
-
-#include <nlohmann/json.hpp>
-
-#include <ctime>
-#include <filesystem>
-#include <fstream>
-#include <mutex>
 
 namespace {
 
@@ -106,6 +110,61 @@ namespace {
         return Backup::Error::EncryptionFailed;
     }
 
+    std::optional<AccountData> processImportedAccount(
+        const std::string &cookie,
+        const std::string &note,
+        bool isFavorite,
+        std::uint64_t originalId
+    ) {
+        auto accountInfo = Roblox::fetchFullAccountInfo(cookie);
+
+        if (!accountInfo) {
+            LOG_WARN("Skipping account during import (ID: {}): {}", originalId, std::string(Roblox::apiErrorToString(accountInfo.error()))
+            );
+            return std::nullopt;
+        }
+
+        const auto &info = *accountInfo;
+
+        if (info.userId == 0 || info.username.empty()) {
+            LOG_WARN("Skipping account with invalid user data (ID: {})", originalId);
+            return std::nullopt;
+        }
+
+        AccountData acct;
+        acct.id = static_cast<int>(originalId);
+        acct.cookie = cookie;
+        acct.note = note;
+        acct.isFavorite = isFavorite;
+        acct.userId = std::to_string(info.userId);
+        acct.username = info.username;
+        acct.displayName = info.displayName;
+
+        switch (info.banInfo.status) {
+            case Roblox::BanCheckResult::Banned:
+                acct.status = "Banned";
+                acct.banExpiry = info.banInfo.endDate;
+                break;
+            case Roblox::BanCheckResult::Warned:
+                acct.status = "Warned";
+                break;
+            case Roblox::BanCheckResult::Terminated:
+                acct.status = "Terminated";
+                break;
+            case Roblox::BanCheckResult::Unbanned:
+                acct.status = info.presence;
+                break;
+            default:
+                acct.status = info.presence;
+                break;
+        }
+
+        acct.voiceStatus = info.voiceSettings.status;
+        acct.voiceBanExpiry = info.voiceSettings.bannedUntil;
+
+        return acct;
+    }
+
 } // namespace
 
 namespace Backup {
@@ -121,7 +180,6 @@ namespace Backup {
         j["version"] = kBackupVersion;
         auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
         j["createdAt"] = static_cast<std::int64_t>(now);
-
 
         {
             auto settingsContents = readFileContents(AltMan::Paths::Config("settings.json").string());
@@ -156,7 +214,6 @@ namespace Backup {
                 return std::unexpected(Error::NoValidAccounts);
             }
 
-
             j["accounts"] = std::move(accounts);
         }
 
@@ -165,7 +222,7 @@ namespace Backup {
             if (favoritesContents) {
                 auto parsed = parseJson(*favoritesContents);
                 if (!parsed) {
-                    LOG_WARN("Failed to parse settings.json, exporting empty settings");
+                    LOG_WARN("Failed to parse favorites.json, exporting empty favorites");
                 }
                 if (parsed && parsed->is_array()) {
                     j["favorites"] = std::move(*parsed);
@@ -252,10 +309,17 @@ namespace Backup {
             return std::unexpected(Error::InvalidFormat);
         }
 
-        std::vector<std::future<std::optional<AccountData>>> futures;
-        futures.reserve((*j)["accounts"].size());
+        struct ImportTask {
+                std::string cookie;
+                std::string note;
+                bool isFavorite;
+                std::uint64_t id;
+        };
 
-        for (const auto &item : (*j)["accounts"]) {
+        std::vector<ImportTask> tasks;
+        tasks.reserve((*j)["accounts"].size());
+
+        for (const auto &item: (*j)["accounts"]) {
             if (!item.is_object()) {
                 continue;
             }
@@ -265,48 +329,27 @@ namespace Backup {
                 continue;
             }
 
-            std::string note = item.value("note", "");
-            bool isFavorite = item.value("isFavorite", false);
-            std::uint64_t id = item.value("id", static_cast<std::uint64_t>(0));
+            tasks.push_back({
+                .cookie = std::move(cookie),
+                .note = item.value("note", ""),
+                .isFavorite = item.value("isFavorite", false),
+                .id = item.value("id", static_cast<std::uint64_t>(0))
+            });
+        }
 
-            futures.push_back(std::async(std::launch::async, [=]() -> std::optional<AccountData> {
-                if (Roblox::cachedBanStatus(cookie) == Roblox::BanCheckResult::InvalidCookie) {
-                    LOG_WARN("Skipping invalid cookie during import (ID: {})", id);
-                    return std::nullopt;
-                }
+        std::vector<std::future<std::optional<AccountData>>> futures;
+        futures.reserve(tasks.size());
 
-                std::uint64_t uid = Roblox::getUserId(cookie);
-                std::string username = Roblox::getUsername(cookie);
-                std::string displayName = Roblox::getDisplayName(cookie);
-
-                if (uid == 0 || username.empty() || displayName.empty()) {
-                    LOG_WARN("Skipping account with invalid user data (ID: {})", id);
-                    return std::nullopt;
-                }
-
-                AccountData acct;
-                acct.id = id;
-                acct.cookie = cookie;
-                acct.note = note;
-                acct.isFavorite = isFavorite;
-                acct.userId = std::to_string(uid);
-                acct.username = std::move(username);
-                acct.displayName = std::move(displayName);
-
-                acct.status = Roblox::getPresence(cookie, uid);
-
-                auto vs = Roblox::getVoiceChatStatus(cookie);
-                acct.voiceStatus = vs.status;
-                acct.voiceBanExpiry = vs.bannedUntil;
-
-                return acct;
+        for (const auto &task: tasks) {
+            futures.push_back(std::async(std::launch::async, [task]() {
+                return processImportedAccount(task.cookie, task.note, task.isFavorite, task.id);
             }));
         }
 
         std::vector<AccountData> imported;
         imported.reserve(futures.size());
 
-        for (auto &fut : futures) {
+        for (auto &fut: futures) {
             if (auto result = fut.get()) {
                 imported.push_back(std::move(*result));
             }

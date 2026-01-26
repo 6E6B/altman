@@ -6,6 +6,8 @@
 #include <nlohmann/json.hpp>
 
 #include "common.h"
+#include "auth.h"
+#include "common.h"
 #include "console/console.h"
 #include "network/http.h"
 #include "ui/windows/components.h"
@@ -61,41 +63,55 @@ namespace Roblox {
         return d;
     }
 
-    ServerPage getPublicServersPage(uint64_t placeId, const std::string &cursor) {
-        std::string url = "https://games.roblox.com/v1/games/" + std::to_string(placeId)
-                          + "/servers/Public?sortOrder=Asc&limit=100" + (cursor.empty() ? "" : "&cursor=" + cursor);
+    ApiResult<GameDetail> getGameDetailResult(uint64_t universeId) {
+        const std::string url = "https://games.roblox.com/v1/games?universeIds=" + std::to_string(universeId);
 
         HttpClient::Response resp = HttpClient::get(url);
         if (resp.status_code < 200 || resp.status_code >= 300) {
-            LOG_ERROR("Failed to fetch servers: HTTP {}", resp.status_code);
-            return ServerPage {};
+            LOG_ERROR("Game detail fetch failed: HTTP {}", resp.status_code);
+            return std::unexpected(httpStatusToError(resp.status_code));
         }
 
-        auto json = HttpClient::decode(resp);
-
-        ServerPage page;
-        if (json.contains("nextPageCursor")) {
-            page.nextCursor
-                = json["nextPageCursor"].is_null() ? std::string {} : json["nextPageCursor"].get<std::string>();
-        }
-
-        if (json.contains("previousPageCursor")) {
-            page.prevCursor
-                = json["previousPageCursor"].is_null() ? std::string {} : json["previousPageCursor"].get<std::string>();
-        }
-
-        if (json.contains("data") && json["data"].is_array()) {
-            for (auto &e: json["data"]) {
-                PublicServerInfo s;
-                s.jobId = e.value("id", "");
-                s.currentPlayers = e.value("playing", 0);
-                s.maximumPlayers = e.value("maxPlayers", 0);
-                s.averagePing = e.value("ping", 0.0);
-                s.averageFps = e.value("fps", 0.0);
-                page.data.push_back(std::move(s));
+        try {
+            nlohmann::json root = nlohmann::json::parse(resp.text);
+            if (!root.contains("data") || !root["data"].is_array() || root["data"].empty()) {
+                return std::unexpected(ApiError::NotFound);
             }
+
+            const auto &j = root["data"][0];
+            GameDetail d;
+            d.name = j.value("name", "");
+            d.genre = j.value("genre", "");
+            d.genreL1 = j.value("genre_l1", "");
+            d.genreL2 = j.value("genre_l2", "");
+            d.description = j.value("description", "");
+            d.visits = j.value("visits", 0ULL);
+            d.favorites = j.value("favoritedCount", 0ULL);
+            d.playing = j.value("playing", 0);
+            d.maxPlayers = j.value("maxPlayers", 0);
+
+            if (j.contains("price") && !j["price"].is_null()) {
+                d.priceRobux = j["price"].get<int>();
+            } else {
+                d.priceRobux = -1;
+            }
+
+            d.createdIso = j.value("created", "");
+            d.updatedIso = j.value("updated", "");
+
+            if (j.contains("creator")) {
+                const auto &c = j["creator"];
+                d.creatorName = c.value("name", "");
+                d.creatorId = c.value("id", 0ULL);
+                d.creatorType = c.value("type", "");
+                d.creatorVerified = c.value("hasVerifiedBadge", false);
+            }
+
+            return d;
+        } catch (const std::exception &e) {
+            LOG_ERROR("Failed to parse game detail: {}", e.what());
+            return std::unexpected(ApiError::ParseError);
         }
-        return page;
     }
 
     std::vector<GameInfo> searchGames(const std::string &query) {
@@ -104,7 +120,7 @@ namespace Roblox {
             "https://apis.roblox.com/search-api/omni-search",
             {
                 {"Accept", "application/json"}
-        },
+            },
             cpr::Parameters {{"searchQuery", query}, {"pageToken", ""}, {"sessionId", sessionId}, {"pageType", "all"}}
         );
 
@@ -144,6 +160,88 @@ namespace Roblox {
         return out;
     }
 
+    ApiResult<std::vector<GameInfo>> searchGamesResult(const std::string &query) {
+        auto games = searchGames(query);
+        return games;
+    }
+
+    ServerPage getPublicServersPage(uint64_t placeId, const std::string &cursor) {
+        std::string url = "https://games.roblox.com/v1/games/" + std::to_string(placeId)
+                          + "/servers/Public?sortOrder=Asc&limit=100"
+                          + (cursor.empty() ? "" : "&cursor=" + cursor);
+
+        HttpClient::Response resp = HttpClient::get(url);
+        if (resp.status_code < 200 || resp.status_code >= 300) {
+            LOG_ERROR("Failed to fetch servers: HTTP {}", resp.status_code);
+            return ServerPage {};
+        }
+
+        auto json = HttpClient::decode(resp);
+
+        ServerPage page;
+        if (json.contains("nextPageCursor")) {
+            page.nextCursor
+                = json["nextPageCursor"].is_null() ? std::string {} : json["nextPageCursor"].get<std::string>();
+        }
+
+        if (json.contains("previousPageCursor")) {
+            page.prevCursor
+                = json["previousPageCursor"].is_null() ? std::string {} : json["previousPageCursor"].get<std::string>();
+        }
+
+        if (json.contains("data") && json["data"].is_array()) {
+            for (auto &e: json["data"]) {
+                PublicServerInfo s;
+                s.jobId = e.value("id", "");
+                s.currentPlayers = e.value("playing", 0);
+                s.maximumPlayers = e.value("maxPlayers", 0);
+                s.averagePing = e.value("ping", 0.0);
+                s.averageFps = e.value("fps", 0.0);
+                page.data.push_back(std::move(s));
+            }
+        }
+        return page;
+    }
+
+    ApiResult<ServerPage> getPublicServersPageResult(uint64_t placeId, const std::string &cursor) {
+        std::string url = "https://games.roblox.com/v1/games/" + std::to_string(placeId)
+                          + "/servers/Public?sortOrder=Asc&limit=100"
+                          + (cursor.empty() ? "" : "&cursor=" + cursor);
+
+        HttpClient::Response resp = HttpClient::get(url);
+        if (resp.status_code < 200 || resp.status_code >= 300) {
+            LOG_ERROR("Failed to fetch servers: HTTP {}", resp.status_code);
+            return std::unexpected(httpStatusToError(resp.status_code));
+        }
+
+        auto json = HttpClient::decode(resp);
+        ServerPage page;
+
+        if (json.contains("nextPageCursor")) {
+            page.nextCursor
+                = json["nextPageCursor"].is_null() ? std::string {} : json["nextPageCursor"].get<std::string>();
+        }
+
+        if (json.contains("previousPageCursor")) {
+            page.prevCursor
+                = json["previousPageCursor"].is_null() ? std::string {} : json["previousPageCursor"].get<std::string>();
+        }
+
+        if (json.contains("data") && json["data"].is_array()) {
+            for (auto &e: json["data"]) {
+                PublicServerInfo s;
+                s.jobId = e.value("id", "");
+                s.currentPlayers = e.value("playing", 0);
+                s.maximumPlayers = e.value("maxPlayers", 0);
+                s.averagePing = e.value("ping", 0.0);
+                s.averageFps = e.value("fps", 0.0);
+                page.data.push_back(std::move(s));
+            }
+        }
+
+        return page;
+    }
+
     GamePrivateServersPage getPrivateServersForGame(uint64_t placeId, const std::string &cookie) {
         std::string url = std::format(
             "https://games.roblox.com/v1/games/{}/private-servers"
@@ -156,7 +254,7 @@ namespace Roblox {
             {
                 {"Cookie",     ".ROBLOSECURITY=" + cookie},
                 {"User-Agent", "Mozilla/5.0"             }
-        }
+            }
         );
 
         if (resp.status_code < 200 || resp.status_code >= 300) {
@@ -218,6 +316,17 @@ namespace Roblox {
         return page;
     }
 
+    ApiResult<GamePrivateServersPage>
+    getPrivateServersForGameResult(uint64_t placeId, const std::string &cookie) {
+        ApiError validationError = validateCookieForRequest(cookie);
+        if (validationError != ApiError::Success) {
+            return std::unexpected(validationError);
+        }
+
+        auto page = getPrivateServersForGame(placeId, cookie);
+        return page;
+    }
+
     MyPrivateServersPage getAllPrivateServers(int serverTab, const std::string &cookie, const std::string &cursor) {
         std::string url = std::format(
             "https://games.roblox.com/v1/private-servers/my-private-servers"
@@ -231,7 +340,7 @@ namespace Roblox {
             {
                 {"Cookie",     ".ROBLOSECURITY=" + cookie},
                 {"User-Agent", "Mozilla/5.0"             }
-        }
+            }
         );
 
         if (resp.status_code < 200 || resp.status_code >= 300) {
@@ -275,6 +384,17 @@ namespace Roblox {
             page.data.push_back(std::move(s));
         }
 
+        return page;
+    }
+
+    ApiResult<MyPrivateServersPage>
+    getAllPrivateServersResult(int serverTab, const std::string &cookie, const std::string &cursor) {
+        ApiError validationError = validateCookieForRequest(cookie);
+        if (validationError != ApiError::Success) {
+            return std::unexpected(validationError);
+        }
+
+        auto page = getAllPrivateServers(serverTab, cookie, cursor);
         return page;
     }
 

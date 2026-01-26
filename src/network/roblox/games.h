@@ -1,9 +1,12 @@
 #pragma once
 
 #include <cstdint>
+#include <expected>
 #include <optional>
 #include <string>
 #include <vector>
+
+#include "common.h"
 
 struct PublicServerInfo;
 struct GameInfo;
@@ -90,12 +93,26 @@ namespace Roblox {
 
     GameDetail getGameDetail(uint64_t universeId);
 
-    ServerPage getPublicServersPage(uint64_t placeId, const std::string &cursor = {});
+    ApiResult<GameDetail> getGameDetailResult(uint64_t universeId);
 
     std::vector<GameInfo> searchGames(const std::string &query);
 
+    ApiResult<std::vector<GameInfo>> searchGamesResult(const std::string &query);
+
+    ServerPage getPublicServersPage(uint64_t placeId, const std::string &cursor = {});
+
+    ApiResult<ServerPage> getPublicServersPageResult(uint64_t placeId, const std::string &cursor = {});
+
     GamePrivateServersPage getPrivateServersForGame(uint64_t placeId, const std::string &cookie);
 
+    ApiResult<GamePrivateServersPage>
+    getPrivateServersForGameResult(uint64_t placeId, const std::string &cookie);
+
+    // Get all private servers for the authenticated user
+    // serverTab: 0 = My Servers, 1 = Joinable Servers
     MyPrivateServersPage getAllPrivateServers(int serverTab, const std::string &cookie, const std::string &cursor = {});
+
+    ApiResult<MyPrivateServersPage>
+    getAllPrivateServersResult(int serverTab, const std::string &cookie, const std::string &cursor = {});
 
 } // namespace Roblox

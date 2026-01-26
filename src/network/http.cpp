@@ -14,6 +14,23 @@
 
 namespace HttpClient {
 
+    nlohmann::json decode(const Response &response) {
+        if (response.text.empty()) {
+            LOG_ERROR("Cannot decode empty response");
+            return nlohmann::json::object();
+        }
+
+        nlohmann::json result;
+        try {
+            result = nlohmann::json::parse(response.text);
+        } catch (const std::exception &e) {
+            LOG_ERROR("Failed to parse JSON response: {}", e.what());
+            return nlohmann::json::object();
+        }
+
+        return result;
+    }
+
     std::string build_kv_string(std::initializer_list<std::pair<const std::string, std::string>> items, char sep) {
         std::ostringstream ss;
         bool first = true;
@@ -103,6 +120,41 @@ namespace HttpClient {
         int max_redirects
     ) {
         cpr::Header h {headers};
+        cpr::Response r;
+
+        if (!jsonBody.empty()) {
+            h["Content-Type"] = "application/json";
+            r = cpr::Post(
+                cpr::Url {url},
+                h,
+                cpr::Body {jsonBody},
+                cpr::Redirect(follow_redirects ? max_redirects : 0L)
+            );
+        } else if (form.size() > 0) {
+            std::string body = build_kv_string(form);
+            h["Content-Type"] = "application/x-www-form-urlencoded";
+            r = cpr::Post(cpr::Url {url}, h, cpr::Body {body}, cpr::Redirect(follow_redirects ? max_redirects : 0L));
+        } else {
+            r = cpr::Post(cpr::Url {url}, h, cpr::Redirect(follow_redirects ? max_redirects : 0L));
+        }
+
+        std::map<std::string, std::string> hdrs(r.header.begin(), r.header.end());
+        return {static_cast<int>(r.status_code), r.text, hdrs, r.url.str()};
+    }
+
+    Response post(
+        const std::string &url,
+        std::span<const std::pair<std::string, std::string>> headers,
+        const std::string &jsonBody,
+        std::initializer_list<std::pair<const std::string, std::string>> form,
+        bool follow_redirects,
+        int max_redirects
+    ) {
+        cpr::Header h;
+        for (const auto &[k, v]: headers) {
+            h.emplace(k, v);
+        }
+
         cpr::Response r;
 
         if (!jsonBody.empty()) {
@@ -358,7 +410,7 @@ namespace HttpClient {
             cpr::Session session;
     };
 
-    DownloadSession::DownloadSession() : impl_(std::make_unique<Impl>()) {
+    DownloadSession::DownloadSession() : m_impl(std::make_unique<Impl>()) {
     }
 
     DownloadSession::~DownloadSession() = default;
@@ -367,15 +419,15 @@ namespace HttpClient {
     DownloadSession &DownloadSession::operator=(DownloadSession &&) noexcept = default;
 
     void DownloadSession::set_url(const std::string &url) {
-        impl_->session.SetUrl(cpr::Url {url});
+        m_impl->session.SetUrl(cpr::Url {url});
     }
 
     void DownloadSession::set_headers(std::initializer_list<std::pair<const std::string, std::string>> headers) {
-        impl_->session.SetHeader(cpr::Header {headers});
+        m_impl->session.SetHeader(cpr::Header {headers});
     }
 
     void DownloadSession::set_follow_redirects(bool follow, int max_redirects) {
-        impl_->session.SetRedirect(cpr::Redirect(follow ? max_redirects : 0L));
+        m_impl->session.SetRedirect(cpr::Redirect(follow ? max_redirects : 0L));
     }
 
     bool DownloadSession::download_to_file(const std::string &output_path, ProgressCallback progress_cb) {
@@ -386,7 +438,7 @@ namespace HttpClient {
         }
 
         if (progress_cb) {
-            impl_->session.SetProgressCallback(
+            m_impl->session.SetProgressCallback(
                 cpr::ProgressCallback {
                     [progress_cb](
                         cpr::cpr_pf_arg_t downloadTotal,
@@ -402,7 +454,7 @@ namespace HttpClient {
             );
         }
 
-        cpr::Response r = impl_->session.Download(file);
+        cpr::Response r = m_impl->session.Download(file);
         file.close();
 
         if (r.status_code != 200) {
@@ -420,21 +472,116 @@ namespace HttpClient {
         return true;
     }
 
-    nlohmann::json decode(const Response &response) {
-        if (response.text.empty()) {
-            LOG_ERROR("Cannot decode empty response");
-            return nlohmann::json::object();
+    RateLimiter::RateLimiter() {
+        m_maxRequests = 30;
+        m_windowSize = std::chrono::milliseconds(1000);
+    }
+
+    RateLimiter &RateLimiter::instance() {
+        static RateLimiter instance;
+        return instance;
+    }
+
+    void RateLimiter::configure(int maxRequests, Duration windowSize) {
+        std::lock_guard lock(m_mutex);
+        m_maxRequests = maxRequests;
+        m_windowSize = windowSize;
+    }
+
+    void RateLimiter::pruneOldRequests() const {
+        auto now = Clock::now();
+        auto cutoff = now - m_windowSize;
+
+        while (!m_requestTimestamps.empty() && m_requestTimestamps.front() < cutoff) {
+            m_requestTimestamps.pop_front();
+        }
+    }
+
+    void RateLimiter::acquire() {
+        std::unique_lock lock(m_mutex);
+
+        while (true) {
+            auto now = Clock::now();
+
+            if (now < m_backoffUntil) {
+                auto waitTime = m_backoffUntil - now;
+                LOG_INFO("Rate limiter: backing off for {}ms",
+                    std::chrono::duration_cast<std::chrono::milliseconds>(waitTime).count());
+                m_cv.wait_for(lock, waitTime);
+                continue;
+            }
+
+            pruneOldRequests();
+
+            if (static_cast<int>(m_requestTimestamps.size()) < m_maxRequests) {
+                m_requestTimestamps.push_back(now);
+                return;
+            }
+
+            auto oldestExpiry = m_requestTimestamps.front() + m_windowSize;
+            auto waitTime = oldestExpiry - now;
+
+            if (waitTime > std::chrono::milliseconds(0)) {
+                m_cv.wait_for(lock, waitTime);
+            }
+        }
+    }
+
+    bool RateLimiter::tryAcquire() {
+        std::lock_guard lock(m_mutex);
+
+        auto now = Clock::now();
+
+        if (now < m_backoffUntil) {
+            return false;
         }
 
-        nlohmann::json result;
-        try {
-            result = nlohmann::json::parse(response.text);
-        } catch (const std::exception &e) {
-            LOG_ERROR("Failed to parse JSON response: {}", e.what());
-            return nlohmann::json::object();
+        pruneOldRequests();
+
+        if (static_cast<int>(m_requestTimestamps.size()) < m_maxRequests) {
+            m_requestTimestamps.push_back(now);
+            return true;
         }
 
-        return result;
+        return false;
+    }
+
+    int RateLimiter::available() const {
+        std::lock_guard lock(m_mutex);
+        pruneOldRequests();
+        return std::max(0, m_maxRequests - static_cast<int>(m_requestTimestamps.size()));
+    }
+
+    void RateLimiter::backoff(Duration duration) {
+        std::lock_guard lock(m_mutex);
+        auto newBackoff = Clock::now() + duration;
+
+        if (newBackoff > m_backoffUntil) {
+            m_backoffUntil = newBackoff;
+            LOG_WARN("Rate limiter: 429 received, backing off for {}ms",
+                std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
+        }
+
+        m_cv.notify_all();
+    }
+
+    Response rateLimitedGet(
+        const std::string &url,
+        const std::vector<std::pair<std::string, std::string>> &headers
+    ) {
+        return rateLimitedRequest([&]() {
+            return HttpClient::get(url, headers);
+        });
+    }
+
+    Response rateLimitedPost(
+        const std::string &url,
+        const std::vector<std::pair<std::string, std::string>> &headers,
+        const std::string &body
+    ) {
+        return rateLimitedRequest([&]() {
+            return HttpClient::post(url, headers, body);
+        });
     }
 
 } // namespace HttpClient

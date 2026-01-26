@@ -2,6 +2,7 @@
 #include <array>
 #include <filesystem>
 #include <format>
+#include <future>
 #include <print>
 #include <string>
 #include <vector>
@@ -17,6 +18,7 @@
 #include "components.h"
 #include "console/console.h"
 #include "data.h"
+#include "network/roblox/common.h"
 #include "network/roblox/auth.h"
 #include "network/roblox/common.h"
 #include "network/roblox/games.h"
@@ -72,53 +74,80 @@ namespace {
         ThreadTask::fireAndForget([] {
             LOG_INFO("Refreshing account statuses...");
 
-            for (auto &acct: g_accounts) {
-                const auto banStatus = Roblox::refreshBanStatus(acct.cookie);
+            std::vector<std::future<std::pair<int, std::optional<Roblox::FullAccountInfo>>>> futures;
+            futures.reserve(g_accounts.size());
 
-                if (banStatus == Roblox::BanCheckResult::Banned) {
-                    acct.status = "Banned";
-                    acct.voiceStatus = "N/A";
-                    acct.voiceBanExpiry = 0;
+            for (const auto &acct: g_accounts) {
+                futures.push_back(std::async(std::launch::async, [cookie = acct.cookie, id = acct.id]() {
+                    auto info = Roblox::fetchFullAccountInfo(cookie);
+                    if (info) {
+                        return std::make_pair(id, std::make_optional(*info));
+                    }
+                    return std::make_pair(id, std::optional<Roblox::FullAccountInfo> {});
+                }));
+            }
+
+            for (auto &fut: futures) {
+                auto [accountId, infoOpt] = fut.get();
+
+                auto it = std::ranges::find_if(g_accounts, [accountId](const AccountData &a) {
+                    return a.id == accountId;
+                });
+
+                if (it == g_accounts.end()) {
                     continue;
                 }
 
-                if (banStatus == Roblox::BanCheckResult::Warned) {
-                    acct.status = "Warned";
-                    acct.voiceStatus = "N/A";
-                    acct.voiceBanExpiry = 0;
+                if (!infoOpt) {
+                    // Keep existing data on network error
                     continue;
                 }
 
-                if (banStatus == Roblox::BanCheckResult::Terminated) {
-                    acct.status = "Terminated";
-                    acct.voiceStatus = "N/A";
-                    acct.voiceBanExpiry = 0;
-                    continue;
+                const auto &info = *infoOpt;
+
+                switch (info.banInfo.status) {
+                    case Roblox::BanCheckResult::Banned:
+                        it->status = "Banned";
+                        it->banExpiry = info.banInfo.endDate;
+                        it->voiceStatus = "N/A";
+                        it->voiceBanExpiry = 0;
+                        continue;
+
+                    case Roblox::BanCheckResult::Warned:
+                        it->status = "Warned";
+                        it->voiceStatus = "N/A";
+                        it->voiceBanExpiry = 0;
+                        continue;
+
+                    case Roblox::BanCheckResult::Terminated:
+                        it->status = "Terminated";
+                        it->voiceStatus = "N/A";
+                        it->voiceBanExpiry = 0;
+                        continue;
+
+                    default:
+                        break;
                 }
 
-                if (acct.userId.empty()) {
-                    continue;
+                // Update presence - fetch full presence data for location info
+                if (!it->userId.empty()) {
+                    const uint64_t uid = std::stoull(it->userId);
+                    auto presenceData = Roblox::getPresenceData(it->cookie, uid);
+                    if (presenceData) {
+                        it->status = presenceData->presence;
+                        it->lastLocation = presenceData->lastLocation;
+                        it->placeId = presenceData->placeId;
+                        it->jobId = presenceData->jobId;
+                    } else {
+                        it->status = info.presence;
+                        it->lastLocation.clear();
+                        it->placeId = 0;
+                        it->jobId.clear();
+                    }
                 }
 
-                const uint64_t uid = std::stoull(acct.userId);
-                const auto presences = Roblox::getPresences({uid}, acct.cookie);
-                const auto presenceIt = presences.find(uid);
-
-                if (presenceIt != presences.end()) {
-                    acct.status = presenceIt->second.presence;
-                    acct.lastLocation = presenceIt->second.lastLocation;
-                    acct.placeId = presenceIt->second.placeId;
-                    acct.jobId = presenceIt->second.jobId;
-                } else {
-                    acct.status = Roblox::getPresence(acct.cookie, uid);
-                    acct.lastLocation.clear();
-                    acct.placeId = 0;
-                    acct.jobId.clear();
-                }
-
-                const auto voiceSettings = Roblox::getVoiceChatStatus(acct.cookie);
-                acct.voiceStatus = voiceSettings.status;
-                acct.voiceBanExpiry = voiceSettings.bannedUntil;
+                it->voiceStatus = info.voiceSettings.status;
+                it->voiceBanExpiry = info.voiceSettings.bannedUntil;
             }
 
             Data::SaveAccounts();
@@ -183,25 +212,26 @@ namespace {
             return false;
         }
 
-        const Roblox::BanCheckResult banStatus = Roblox::cachedBanStatus(trimmedCookie);
-        if (banStatus == Roblox::BanCheckResult::InvalidCookie) {
-            BottomRightStatus::Error("Invalid cookie: Unable to authenticate with Roblox");
+        auto accountInfo = Roblox::fetchFullAccountInfo(trimmedCookie);
+
+        if (!accountInfo) {
+            if (accountInfo.error() == Roblox::ApiError::InvalidCookie) {
+                BottomRightStatus::Error("Invalid cookie: Unable to authenticate with Roblox");
+            } else {
+                BottomRightStatus::Error("Invalid cookie: Unable to retrieve user information");
+            }
             return false;
         }
 
-        const int nextId = GetMaxAccountId() + 1;
-        const uint64_t uid = Roblox::getUserId(trimmedCookie);
-        const std::string username = Roblox::getUsername(trimmedCookie);
-        const std::string displayName = Roblox::getDisplayName(trimmedCookie);
+        const auto &info = *accountInfo;
 
-        if (uid == 0 || username.empty() || displayName.empty()) {
+        if (info.userId == 0 || info.username.empty() || info.displayName.empty()) {
             BottomRightStatus::Error("Invalid cookie: Unable to retrieve user information");
             return false;
         }
 
-        const std::string userIdStr = std::to_string(uid);
-        const std::string presence = Roblox::getPresence(trimmedCookie, uid);
-        const auto voiceSettings = Roblox::getVoiceChatStatus(trimmedCookie);
+        const int nextId = GetMaxAccountId() + 1;
+        const std::string userIdStr = std::to_string(info.userId);
 
         const auto existingAccount
             = std::find_if(g_accounts.begin(), g_accounts.end(), [&userIdStr](const AccountData &a) {
@@ -211,16 +241,24 @@ namespace {
         if (existingAccount != g_accounts.end()) {
             ShowDuplicateAccountPrompt(
                 trimmedCookie,
-                username,
-                displayName,
-                presence,
+                info.username,
+                info.displayName,
+                info.presence,
                 userIdStr,
-                voiceSettings,
+                info.voiceSettings,
                 existingAccount->id,
                 nextId
             );
         } else {
-            CreateNewAccount(nextId, trimmedCookie, userIdStr, username, displayName, presence, voiceSettings);
+            CreateNewAccount(
+                nextId,
+                trimmedCookie,
+                userIdStr,
+                info.username,
+                info.displayName,
+                info.presence,
+                info.voiceSettings
+            );
         }
 
         return true;

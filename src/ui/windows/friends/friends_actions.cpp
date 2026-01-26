@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "console/console.h"
+#include "network/roblox/common.h"
 #include "network/roblox/auth.h"
 #include "network/roblox/common.h"
 #include "network/roblox/games.h"
@@ -76,26 +77,21 @@ namespace {
         const std::vector<uint64_t> &ids,
         const std::string &cookie
     ) {
+        auto presMap = Roblox::getPresencesBatch(ids, cookie);
 
-        constexpr std::size_t BATCH_SIZE = 100;
-        const std::size_t numBatches = (ids.size() + BATCH_SIZE - 1) / BATCH_SIZE;
+        if (!presMap) {
+            LOG_WARN("Failed to fetch presences: {}", Roblox::apiErrorToString(presMap.error()));
+            return;
+        }
 
-        for (std::size_t batch = 0; batch < numBatches; ++batch) {
-            const std::size_t start = batch * BATCH_SIZE;
-            const std::size_t end = std::min(start + BATCH_SIZE, ids.size());
-            const std::vector<uint64_t> batchIds(ids.begin() + start, ids.begin() + end);
-
-            const auto presMap = Roblox::getPresences(batchIds, cookie);
-
-            // O(1) lookup instead of O(n) find_if
-            for (const auto &[uid, pdata]: presMap) {
-                if (auto it = friendIndex.find(uid); it != friendIndex.end()) {
-                    auto *friend_ptr = it->second;
-                    friend_ptr->presence = pdata.presence;
-                    friend_ptr->lastLocation = pdata.lastLocation;
-                    friend_ptr->placeId = pdata.placeId;
-                    friend_ptr->jobId = pdata.jobId;
-                }
+        // O(1) lookup instead of O(n) find_if
+        for (const auto &[uid, pdata]: *presMap) {
+            if (auto it = friendIndex.find(uid); it != friendIndex.end()) {
+                auto *friend_ptr = it->second;
+                friend_ptr->presence = pdata.presence;
+                friend_ptr->lastLocation = pdata.lastLocation;
+                friend_ptr->placeId = pdata.placeId;
+                friend_ptr->jobId = pdata.jobId;
             }
         }
     }

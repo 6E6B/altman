@@ -1,10 +1,124 @@
 #include "common.h"
 
 #include <cctype>
-#include <charconv>
 #include <random>
 
 #include <imgui.h>
+
+#include "auth.h"
+#include "console/console.h"
+
+namespace Roblox {
+
+    CsrfManager &CsrfManager::instance() {
+        static CsrfManager instance;
+        return instance;
+    }
+
+    std::string CsrfManager::getToken(const std::string &cookie) const {
+        std::shared_lock lock(m_mutex);
+        auto it = m_tokens.find(cookie);
+        return it != m_tokens.end() ? it->second : std::string {};
+    }
+
+    void CsrfManager::updateToken(const std::string &cookie, const std::string &token) {
+        std::unique_lock lock(m_mutex);
+        m_tokens[cookie] = token;
+    }
+
+    void CsrfManager::invalidateToken(const std::string &cookie) {
+        std::unique_lock lock(m_mutex);
+        m_tokens.erase(cookie);
+    }
+
+    void CsrfManager::clear() {
+        std::unique_lock lock(m_mutex);
+        m_tokens.clear();
+    }
+
+    HttpClient::Response authenticatedPost(
+        const std::string &url,
+        const std::string &cookie,
+        const std::string &jsonBody,
+        std::initializer_list<std::pair<const std::string, std::string>> extraHeaders
+    ) {
+        auto &csrfMgr = CsrfManager::instance();
+
+        auto buildHeaders = [&](const std::string &csrf) {
+            std::vector<std::pair<std::string, std::string>> headers = {
+                {"Cookie",  ".ROBLOSECURITY=" + cookie},
+                {"Accept",  "application/json"        },
+                {"Origin",  "https://www.roblox.com"  },
+                {"Referer", "https://www.roblox.com/" }
+            };
+
+            if (!csrf.empty()) {
+                headers.emplace_back("X-CSRF-TOKEN", csrf);
+            }
+
+            if (!jsonBody.empty()) {
+                headers.emplace_back("Content-Type", "application/json");
+            }
+
+            for (const auto &[key, value]: extraHeaders) {
+                headers.emplace_back(key, value);
+            }
+
+            return headers;
+        };
+
+        std::string csrf = csrfMgr.getToken(cookie);
+        auto headers = buildHeaders(csrf);
+
+        HttpClient::Response resp = HttpClient::post(url, {headers.begin(), headers.end()}, jsonBody);
+
+        if (resp.status_code == 403) {
+            auto it = resp.headers.find("x-csrf-token");
+            if (it != resp.headers.end() && !it->second.empty()) {
+                LOG_INFO("CSRF token expired, retrying with new token");
+                csrfMgr.updateToken(cookie, it->second);
+
+                headers = buildHeaders(it->second);
+                resp = HttpClient::post(url, {headers.begin(), headers.end()}, jsonBody);
+            }
+        }
+
+        if (resp.status_code >= 200 && resp.status_code < 300) {
+            auto it = resp.headers.find("x-csrf-token");
+            if (it != resp.headers.end() && !it->second.empty()) {
+                csrfMgr.updateToken(cookie, it->second);
+            }
+        }
+
+        return resp;
+    }
+
+    ApiError validateCookieForRequest(const std::string &cookie) {
+        if (cookie.empty()) {
+            return ApiError::InvalidInput;
+        }
+
+        BanCheckResult status = cachedBanStatus(cookie);
+
+        switch (status) {
+            case BanCheckResult::Unbanned:
+                return ApiError::Success;
+            case BanCheckResult::InvalidCookie:
+                return ApiError::InvalidCookie;
+            case BanCheckResult::Banned:
+                return ApiError::CookieBanned;
+            case BanCheckResult::Warned:
+                return ApiError::CookieWarned;
+            case BanCheckResult::Terminated:
+                return ApiError::CookieTerminated;
+            case BanCheckResult::NetworkError:
+                return ApiError::NetworkError;
+            default:
+                return ApiError::Unknown;
+        }
+    }
+
+} // namespace Roblox
 
 ImVec4 getStatusColor(std::string statusCode) {
     if (statusCode == "Online") {

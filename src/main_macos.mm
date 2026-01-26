@@ -15,6 +15,7 @@
 #include "components/data.h"
 #include "console/console.h"
 #include "image.h"
+#include "network/roblox/common.h"
 #include "network/roblox/auth.h"
 #include "network/roblox/common.h"
 #include "network/roblox/games.h"
@@ -33,6 +34,7 @@
 #include <cstdio>
 #include <expected>
 #include <format>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <print>
@@ -212,64 +214,85 @@ namespace AccountProcessor {
             return result;
         }
 
-        auto userJson = Roblox::getAuthenticatedUser(account.cookie);
-        if (userJson.empty()) {
-            result.status = "Network Error";
-            result.voiceStatus = "N/A";
-            result.shouldDeselect = true;
-            result.isInvalid = false;
-            return result;
+        auto accountInfo = Roblox::fetchFullAccountInfo(account.cookie);
+
+        if (!accountInfo) {
+            switch (accountInfo.error()) {
+                case Roblox::ApiError::InvalidCookie:
+                    result.isInvalid = true;
+                    result.status = "InvalidCookie";
+                    result.voiceStatus = "N/A";
+                    result.shouldDeselect = true;
+                    return result;
+
+                case Roblox::ApiError::NetworkError:
+                case Roblox::ApiError::Timeout:
+                case Roblox::ApiError::ConnectionFailed:
+                    result.status = "Network Error";
+                    result.voiceStatus = "N/A";
+                    result.shouldDeselect = false;
+                    return result;
+
+                default:
+                    result.status = "Error";
+                    result.voiceStatus = "N/A";
+                    return result;
+            }
         }
 
-        const uint64_t userId = userJson.value("id", 0ULL);
-        result.userId = std::to_string(userId);
-        result.username = userJson.value("name", std::string {});
-        result.displayName = userJson.value("displayName", std::string {});
+        const auto &info = *accountInfo;
 
-        if (userId == 0) {
-            result.status = "Error";
-            return result;
-        }
+        result.userId = std::to_string(info.userId);
+        result.username = info.username;
+        result.displayName = info.displayName;
 
-        auto banInfo = Roblox::checkBanStatus(account.cookie);
-        switch (banInfo.status) {
+        switch (info.banInfo.status) {
             case Roblox::BanCheckResult::InvalidCookie:
                 result.isInvalid = true;
-                break;
+                result.status = "InvalidCookie";
+                result.voiceStatus = "N/A";
+                result.shouldDeselect = true;
+                return result;
 
             case Roblox::BanCheckResult::Banned:
                 result.status = "Banned";
-                result.banExpiry = banInfo.endDate;
+                result.banExpiry = info.banInfo.endDate;
                 result.voiceStatus = "N/A";
                 result.shouldDeselect = true;
                 return result;
 
             case Roblox::BanCheckResult::Warned:
+                result.status = "Warned";
+                result.shouldDeselect = true;
                 break;
 
             case Roblox::BanCheckResult::Terminated:
-                break;
+                result.status = "Terminated";
+                result.voiceStatus = "N/A";
+                result.shouldDeselect = true;
+                return result;
+
+            case Roblox::BanCheckResult::NetworkError:
+                result.status = "Network Error";
+                result.voiceStatus = "N/A";
+                return result;
 
             case Roblox::BanCheckResult::Unbanned:
                 break;
-
-            case Roblox::BanCheckResult::NetworkError:
-                break;
         }
 
-        auto voiceStatus = Roblox::getVoiceChatStatus(account.cookie);
-        result.voiceStatus = voiceStatus.status;
-        result.voiceBanExpiry = voiceStatus.bannedUntil;
+        result.voiceStatus = info.voiceSettings.status;
+        result.voiceBanExpiry = info.voiceSettings.bannedUntil;
+        result.status = info.presence;
 
-        auto presences = Roblox::getPresences({userId}, account.cookie);
-        if (auto it = presences.find(userId); it != presences.end()) {
-            const auto &presence = it->second;
-            result.status = presence.presence;
-            result.lastLocation = presence.lastLocation;
-            result.placeId = presence.placeId;
-            result.jobId = presence.jobId;
-        } else {
-            result.status = "Offline";
+        if (info.userId != 0 && info.banInfo.status == Roblox::BanCheckResult::Unbanned) {
+            auto presenceData = Roblox::getPresenceData(account.cookie, info.userId);
+            if (presenceData) {
+                result.status = presenceData->presence;
+                result.lastLocation = presenceData->lastLocation;
+                result.placeId = presenceData->placeId;
+                result.jobId = presenceData->jobId;
+            }
         }
 
         return result;
@@ -300,7 +323,7 @@ namespace AccountProcessor {
 
             if (result.shouldDeselect) {
                 {
-                    std::lock_guard lock(g_selectionMutex);
+                    std::lock_guard selLock(g_selectionMutex);
                     g_selectedAccountIds.erase(result.id);
                 }
             }
@@ -339,20 +362,30 @@ namespace AccountProcessor {
 void refreshAccounts() {
     auto snapshots = AccountProcessor::takeAccountSnapshots();
 
+    std::vector<std::future<AccountProcessor::ProcessResult>> futures;
+    futures.reserve(snapshots.size());
+
+    for (const auto &snapshot: snapshots) {
+        futures.push_back(std::async(std::launch::async, [snapshot]() {
+            return AccountProcessor::processAccount(snapshot);
+        }));
+    }
+
     std::vector<AccountProcessor::ProcessResult> results;
-    results.reserve(snapshots.size());
+    results.reserve(futures.size());
 
     std::vector<int> invalidIds;
     std::string invalidNames;
 
-    for (const auto &snapshot: snapshots) {
-        auto result = AccountProcessor::processAccount(snapshot);
+    for (size_t i = 0; i < futures.size(); ++i) {
+        auto result = futures[i].get();
 
         if (result.isInvalid) {
             invalidIds.push_back(result.id);
             if (!invalidNames.empty()) {
                 invalidNames.append(", ");
             }
+            const auto &snapshot = snapshots[i];
             invalidNames.append(snapshot.displayName.empty() ? snapshot.username : snapshot.displayName);
         }
 
@@ -432,7 +465,6 @@ void initializeAutoUpdater() {
 
         Re-assemble after patch
         ```lipo patched.arm64 patched.x86_64 -create -output AltMan```
-
 
 
 
@@ -639,6 +671,8 @@ int main(int argc, const char *argv[]) {
             std::println("Failed to initialize crypto library {}", Crypto::errorToString(result.error()));
             return 1;
         }
+
+        HttpClient::RateLimiter::instance().configure(50, std::chrono::milliseconds(1000));
 
         Data::LoadSettings("settings.json");
 
