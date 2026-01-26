@@ -8,6 +8,7 @@
 
 #ifdef __APPLE__
 #include <sys/types.h>
+#include "components/data.h"
 #endif
 
 namespace MultiInstance {
@@ -35,6 +36,8 @@ namespace MultiInstance {
 
     void Enable();
     void Disable();
+
+    bool isMobileClient(std::string_view clientName);
 
     std::string getUserClientPath(const std::string &username, const std::string &clientName);
     std::string getBaseClientPath(const std::string &clientName);
@@ -67,6 +70,9 @@ namespace MultiInstance {
     );
 
     bool ensureClientKey(const std::string &username, const std::string &clientName, const std::string &key);
+
+    bool copyClientToUserEnvironment(const std::string &username, const std::string &clientName);
+    bool createSandboxedRoblox(AccountData &acc, const std::string &protocolURL);
 
     bool launchSandboxedClient(
         const std::string &username,

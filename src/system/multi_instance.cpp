@@ -55,35 +55,8 @@ namespace MultiInstance {
         const char *SEMAPHORE_NAME = "/RobloxPlayerUniq";
         std::map<pid_t, RobloxInstance> g_activeInstances;
         std::mutex g_instanceMutex;
-    } // namespace
 
-    void Enable() {
-        /*if (g_semaphore == SEM_FAILED) {
-            g_semaphore = sem_open(SEMAPHORE_NAME, O_CREAT, 0644, 1);
-            if (g_semaphore == SEM_FAILED) {
-                return;
-            }
-        }*/
-    }
 
-    void Disable() {
-        /*if (g_semaphore != SEM_FAILED) {
-            sem_close(g_semaphore);
-            sem_unlink(SEMAPHORE_NAME);
-            g_semaphore = SEM_FAILED;
-        }*/
-    }
-
-    std::string getUserClientPath(const std::string &username, const std::string &clientName) {
-        auto appDataDir = AltMan::Paths::AppData();
-        if (appDataDir.empty()) {
-            return "";
-        }
-
-        return std::format("{}/environments/{}/Applications/{}.app", appDataDir.string(), username, clientName);
-    }
-
-    namespace {
         std::optional<std::string> getBundleIdentifier(const std::filesystem::path &appBundle) {
             std::filesystem::path plistPath = appBundle / "Contents" / "Info.plist";
 
@@ -238,6 +211,36 @@ namespace MultiInstance {
             return std::filesystem::exists(libgloopMarker);
         }
     } // namespace
+
+    void Enable() {
+        /*if (g_semaphore == SEM_FAILED) {
+            g_semaphore = sem_open(SEMAPHORE_NAME, O_CREAT, 0644, 1);
+            if (g_semaphore == SEM_FAILED) {
+                return;
+            }
+        }*/
+    }
+
+    void Disable() {
+        /*if (g_semaphore != SEM_FAILED) {
+            sem_close(g_semaphore);
+            sem_unlink(SEMAPHORE_NAME);
+            g_semaphore = SEM_FAILED;
+        }*/
+    }
+
+    bool isMobileClient(std::string_view clientName) {
+        return clientName == "Delta";
+    }
+
+    std::string getUserClientPath(const std::string &username, const std::string &clientName) {
+        auto appDataDir = AltMan::Paths::AppData();
+        if (appDataDir.empty()) {
+            return "";
+        }
+
+        return std::format("{}/environments/{}/Applications/{}.app", appDataDir.string(), username, clientName);
+    }
 
     void saveSourceHash(const std::string &destPath) {
         try {
@@ -641,6 +644,134 @@ namespace MultiInstance {
 
         keyFile << key;
         keyFile.close();
+        return true;
+    }
+
+    bool copyClientToUserEnvironment(const std::string &username, const std::string &clientName) {
+        std::string baseClientName = "Default";
+
+        for (const auto &acc: g_accounts) {
+            if (acc.username == username) {
+                if (!acc.customClientBase.empty()) {
+                    baseClientName = acc.customClientBase;
+                }
+                break;
+            }
+        }
+
+        auto appDataDir = AltMan::Paths::AppData();
+
+        std::string sourcePath = std::format("{}/clients/{}.app", appDataDir.string(), baseClientName);
+        std::string destPath = MultiInstance::getUserClientPath(username, clientName);
+
+        if (sourcePath.empty() || destPath.empty()) {
+            LOG_ERROR("Failed to get client paths");
+            return false;
+        }
+
+        if (!std::filesystem::exists(sourcePath)) {
+            LOG_ERROR("Base client not found: {}", sourcePath);
+            return false;
+        }
+
+        std::filesystem::path destDir = std::filesystem::path(destPath).parent_path();
+        std::error_code ec;
+        std::filesystem::create_directories(destDir, ec);
+        if (ec) {
+            LOG_ERROR("Failed to create Applications directory: {}", ec.message());
+            return false;
+        }
+
+        if (!needsClientUpdate(sourcePath, destPath)) {
+            return true;
+        }
+
+        if (std::filesystem::exists(destPath)) {
+            std::filesystem::remove_all(destPath, ec);
+            if (ec) {
+                LOG_ERROR("Failed to remove old client: {}", ec.message());
+                return false;
+            }
+        }
+
+        std::filesystem::copy(sourcePath, destPath, std::filesystem::copy_options::recursive, ec);
+
+        if (ec) {
+            LOG_ERROR("Failed to copy client: {}", ec.message());
+            return false;
+        }
+
+        saveSourceHash(destPath);
+        return true;
+    }
+
+    bool createSandboxedRoblox(AccountData &acc, const std::string &protocolURL) {
+        std::string baseClientName
+            = acc.isUsingCustomClient && !acc.customClientBase.empty() ? acc.customClientBase : "Default";
+
+        if (baseClientName == "Hydrogen" || baseClientName == "Delta") {
+            auto keyIt = g_clientKeys.find(baseClientName);
+            if (keyIt == g_clientKeys.end() || keyIt->second.empty()) {
+                LOG_ERROR("Key required for {} but not found", baseClientName);
+                return false;
+            }
+
+            if (!ensureClientKey(acc.username, baseClientName, keyIt->second)) {
+                return false;
+            }
+        }
+
+        if (acc.username.empty()) {
+            LOG_ERROR("Username is empty or invalid");
+            return false;
+        }
+
+        std::string clientName = "Roblox_" + acc.username;
+
+        if (acc.clientName != clientName) {
+            acc.clientName = clientName;
+            acc.isUsingCustomClient = true;
+            Data::SaveAccounts();
+        }
+
+        if (!copyClientToUserEnvironment(acc.username, clientName)) {
+            LOG_ERROR("Failed to copy client to user environment");
+            return false;
+        }
+
+        if (!isClientInstalled(acc.username, clientName)) {
+            LOG_ERROR("Client not found after copy: {}", clientName);
+            return false;
+        }
+
+        std::string profilePath;
+        if (!createProfileEnvironment(acc.username, profilePath)) {
+            LOG_ERROR("Failed to create profile environment");
+            return false;
+        }
+
+        createKeychain(acc.username);
+        unlockKeychain(acc.username);
+
+        if (needsBundleIdModification(acc.username, clientName, acc.username)) {
+            if (!modifyBundleIdentifier(acc.username, clientName, acc.username, true)) {
+                LOG_ERROR("Failed to modify bundle identifier");
+                return false;
+            }
+        }
+
+        bool hasLaunched = launchSandboxedClient(acc.username, clientName, acc.username, profilePath, protocolURL);
+
+        if (!hasLaunched) {
+            LOG_ERROR("Failed to launch client");
+            return false;
+        }
+
+        if (!acc.isUsingCustomClient) {
+            acc.isUsingCustomClient = true;
+            Data::SaveAccounts();
+        }
+
         return true;
     }
 

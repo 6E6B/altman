@@ -28,11 +28,6 @@ struct LaunchParams {
         static LaunchParams followUser(const std::string &userId);
 };
 
-#ifdef __APPLE__
-bool copyClientToUserEnvironment(const std::string &username, const std::string &clientName);
-bool createSandboxedRoblox(AccountData &acc, const std::string &protocolURL);
-#endif
-
 bool startRoblox(const LaunchParams &params, AccountData acc);
 void launchWithAccounts(const LaunchParams &params, const std::vector<AccountData> &accounts);
 void launchWithSelectedAccounts(LaunchParams params);

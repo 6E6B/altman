@@ -330,141 +330,6 @@ bool startRoblox(const LaunchParams &params, AccountData acc) {
 
 #elif __APPLE__
 
-namespace {
-    bool isMobileClient(std::string_view clientName) {
-        return clientName == "Delta";
-    }
-} // namespace
-
-bool copyClientToUserEnvironment(const std::string &username, const std::string &clientName) {
-    std::string baseClientName = "Default";
-
-    for (const auto &acc: g_accounts) {
-        if (acc.username == username) {
-            if (!acc.customClientBase.empty()) {
-                baseClientName = acc.customClientBase;
-            }
-            break;
-        }
-    }
-
-    auto appDataDir = AltMan::Paths::AppData();
-
-    std::string sourcePath = std::format("{}/clients/{}.app", appDataDir.string(), baseClientName);
-    std::string destPath = MultiInstance::getUserClientPath(username, clientName);
-
-    if (sourcePath.empty() || destPath.empty()) {
-        LOG_ERROR("Failed to get client paths");
-        return false;
-    }
-
-    if (!std::filesystem::exists(sourcePath)) {
-        LOG_ERROR("Base client not found: {}", sourcePath);
-        return false;
-    }
-
-    std::filesystem::path destDir = std::filesystem::path(destPath).parent_path();
-    std::error_code ec;
-    std::filesystem::create_directories(destDir, ec);
-    if (ec) {
-        LOG_ERROR("Failed to create Applications directory: {}", ec.message());
-        return false;
-    }
-
-    if (!MultiInstance::needsClientUpdate(sourcePath, destPath)) {
-        return true;
-    }
-
-    if (std::filesystem::exists(destPath)) {
-        std::filesystem::remove_all(destPath, ec);
-        if (ec) {
-            LOG_ERROR("Failed to remove old client: {}", ec.message());
-            return false;
-        }
-    }
-
-    std::filesystem::copy(sourcePath, destPath, std::filesystem::copy_options::recursive, ec);
-
-    if (ec) {
-        LOG_ERROR("Failed to copy client: {}", ec.message());
-        return false;
-    }
-
-    MultiInstance::saveSourceHash(destPath);
-    return true;
-}
-
-bool createSandboxedRoblox(AccountData &acc, const std::string &protocolURL) {
-    std::string baseClientName
-        = acc.isUsingCustomClient && !acc.customClientBase.empty() ? acc.customClientBase : "Default";
-
-    if (baseClientName == "Hydrogen" || baseClientName == "Delta") {
-        auto keyIt = g_clientKeys.find(baseClientName);
-        if (keyIt == g_clientKeys.end() || keyIt->second.empty()) {
-            LOG_ERROR("Key required for {} but not found", baseClientName);
-            return false;
-        }
-
-        if (!MultiInstance::ensureClientKey(acc.username, baseClientName, keyIt->second)) {
-            return false;
-        }
-    }
-
-    if (acc.username.empty()) {
-        LOG_ERROR("Username is empty or invalid");
-        return false;
-    }
-
-    std::string clientName = "Roblox_" + acc.username;
-
-    if (acc.clientName != clientName) {
-        acc.clientName = clientName;
-        acc.isUsingCustomClient = true;
-        Data::SaveAccounts();
-    }
-
-    if (!copyClientToUserEnvironment(acc.username, clientName)) {
-        LOG_ERROR("Failed to copy client to user environment");
-        return false;
-    }
-
-    if (!MultiInstance::isClientInstalled(acc.username, clientName)) {
-        LOG_ERROR("Client not found after copy: {}", clientName);
-        return false;
-    }
-
-    std::string profilePath;
-    if (!MultiInstance::createProfileEnvironment(acc.username, profilePath)) {
-        LOG_ERROR("Failed to create profile environment");
-        return false;
-    }
-
-    MultiInstance::createKeychain(acc.username);
-    MultiInstance::unlockKeychain(acc.username);
-
-    if (MultiInstance::needsBundleIdModification(acc.username, clientName, acc.username)) {
-        if (!MultiInstance::modifyBundleIdentifier(acc.username, clientName, acc.username, true)) {
-            LOG_ERROR("Failed to modify bundle identifier");
-            return false;
-        }
-    }
-
-    bool hasLaunched
-        = MultiInstance::launchSandboxedClient(acc.username, clientName, acc.username, profilePath, protocolURL);
-
-    if (!hasLaunched) {
-        LOG_ERROR("Failed to launch client");
-        return false;
-    }
-
-    if (!acc.isUsingCustomClient) {
-        acc.isUsingCustomClient = true;
-        Data::SaveAccounts();
-    }
-
-    return true;
-}
-
 bool startRoblox(const LaunchParams &params, AccountData acc) {
     auto ticket = Roblox::fetchAuthTicket(acc.cookie);
     if (ticket.empty()) {
@@ -480,7 +345,7 @@ bool startRoblox(const LaunchParams &params, AccountData acc) {
         return false;
     }
 
-    const bool isMobile = isMobileClient(acc.customClientBase);
+    const bool isMobile = MultiInstance::isMobileClient(acc.customClientBase);
     const auto launchUrl = isMobile ? urls->mobile : urls->desktop;
     const auto protocolCommand = buildProtocolCommand(isMobile, ticket, timestamp, launchUrl, browserTrackerId);
 
@@ -496,7 +361,7 @@ bool startRoblox(const LaunchParams &params, AccountData acc) {
         Data::SaveAccounts();
     }
 
-    if (!createSandboxedRoblox(acc, protocolCommand)) {
+    if (!MultiInstance::createSandboxedRoblox(acc, protocolCommand)) {
         LOG_ERROR("Failed to create sandboxed client instance");
         return false;
     }
