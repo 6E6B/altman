@@ -1,2 +1,4 @@
 #pragma once
-constexpr const char *APP_VERSION = "1.5.0";
+#include <string_view>
+
+constexpr std::string_view APP_VERSION = "1.7.1";

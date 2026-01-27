@@ -1,146 +1,513 @@
 #define STB_IMAGE_IMPLEMENTATION
+
 #import <Cocoa/Cocoa.h>
 #import <Metal/Metal.h>
 #import <MetalKit/MetalKit.h>
+#import <TargetConditionals.h>
 
 #include "imgui.h"
 #include "imgui_impl_metal.h"
 #include "imgui_impl_osx.h"
-#include "stb_image.h"
+#include "utils/stb_image.h"
 
-#include "../ui.h"
+#include "assets/fonts/embedded_fa_solid.h"
+#include "assets/fonts/embedded_rubik.h"
 #include "components/data.h"
-#include "network/roblox.h"
-#include "ui/notifications.h"
-#include "core/logging.hpp"
-#include "ui/confirm.h"
-#include "system/main_thread.h"
-#include "system/update.h"
+#include "console/console.h"
+#include "image.h"
+#include "network/roblox/common.h"
+#include "network/roblox/auth.h"
+#include "network/roblox/common.h"
+#include "network/roblox/games.h"
+#include "network/roblox/session.h"
+#include "network/roblox/social.h"
+#include "system/auto_updater.h"
+#include "system/client_update_checker_macos.h"
+#include "ui/ui.h"
+#include "ui/widgets/modal_popup.h"
+#include "ui/widgets/notifications.h"
+#include "utils/crypto.h"
+#include "utils/thread_task.h"
 
-#include <cstdio>
-#include <thread>
-#include <chrono>
 #include <algorithm>
+#include <chrono>
+#include <cstdio>
+#include <expected>
+#include <format>
+#include <future>
+#include <memory>
+#include <mutex>
+#include <print>
+#include <ranges>
+#include <shared_mutex>
 #include <string>
+#include <thread>
 
-// Global Metal device
-static id<MTLDevice> g_metalDevice = nil;
-static id<MTLCommandQueue> g_commandQueue = nil;
+namespace {
+    id<MTLDevice> g_metalDevice = nil;
+    id<MTLCommandQueue> g_commandQueue = nil;
+    ImFont *g_rubikFont = nullptr;
+    ImFont *g_iconFont = nullptr;
 
-// DPI scaling (macOS uses points, but we track scale for consistency)
-static float g_currentDPIScale = 1.0f;
-static ImFont *g_rubikFont = nullptr;
-static ImFont *g_iconFont = nullptr;
+    constexpr ImWchar ICON_MIN_FA = 0xf000;
+    constexpr ImWchar ICON_MAX_16_FA = 0xf3ff;
+    constexpr float BASE_FONT_SIZE = 16.0f;
 
-#define ICON_MIN_FA 0xf000
-#define ICON_MAX_16_FA 0xf3ff
+    std::atomic<bool> g_fontReloadPending = false;
+    std::atomic<bool> g_running = true;
+} // namespace
 
 void ReloadFonts(float dpiScale) {
-    ImGuiIO &io = ImGui::GetIO();
-    io.Fonts->Clear();
-    
-    float baseFontSize = 16.0f * dpiScale;
-    float iconFontSize = 13.0f * dpiScale;
+    IM_ASSERT([NSThread isMainThread]);
 
-    // Load main font
-    g_rubikFont = io.Fonts->AddFontFromFileTTF("assets/fonts/rubik-regular.ttf", baseFontSize);
+    ImGuiIO &io = ImGui::GetIO();
+
+    io.Fonts->Clear();
+
+    const float scaledFontSize = BASE_FONT_SIZE * dpiScale;
+
+    ImFontConfig rubikCfg {};
+    rubikCfg.FontDataOwnedByAtlas = false;
+    g_rubikFont = io.Fonts->AddFontFromMemoryTTF(
+        const_cast<void *>(static_cast<const void *>(EmbeddedFonts::rubik_regular_ttf)),
+        sizeof(EmbeddedFonts::rubik_regular_ttf),
+        scaledFontSize,
+        &rubikCfg
+    );
+
     if (!g_rubikFont) {
         LOG_ERROR("Failed to load rubik-regular.ttf font.");
         g_rubikFont = io.Fonts->AddFontDefault();
     }
 
-    // Load icon font
-    ImFontConfig iconCfg;
+    ImFontConfig iconCfg {};
     iconCfg.MergeMode = true;
     iconCfg.PixelSnapH = true;
+    iconCfg.FontDataOwnedByAtlas = false;
+    iconCfg.GlyphMinAdvanceX = scaledFontSize;
+
     static constexpr ImWchar fa_solid_ranges[] = {ICON_MIN_FA, ICON_MAX_16_FA, 0};
-    g_iconFont = io.Fonts->AddFontFromFileTTF(
-        "assets/fonts/fa-solid.ttf",
-        iconFontSize,
+    g_iconFont = io.Fonts->AddFontFromMemoryTTF(
+        const_cast<void *>(static_cast<const void *>(EmbeddedFonts::fa_solid_ttf)),
+        sizeof(EmbeddedFonts::fa_solid_ttf),
+        scaledFontSize,
         &iconCfg,
-        fa_solid_ranges);
-    
+        fa_solid_ranges
+    );
+
     if (!g_iconFont && g_rubikFont) {
         LOG_ERROR("Failed to load fa-solid.ttf font for icons.");
     }
-    
+
     io.FontDefault = g_rubikFont;
 
-    ImGuiStyle &style = ImGui::GetStyle();
-    style = ImGuiStyle();
     ImGui::StyleColorsDark();
-    style.ScaleAllSizes(dpiScale);
+    ImGui::GetStyle().ScaleAllSizes(dpiScale);
 
-    io.Fonts->Build();
+    g_fontReloadPending = true;
 }
 
-// Load texture from memory (Metal implementation)
-bool LoadTextureFromMemory(const void *data, size_t data_size, void **out_texture, int *out_width, int *out_height) {
-    // Decode image using stb_image
+[[nodiscard]]
+std::expected<TextureLoadResult, std::string> LoadTextureFromMemory(const void *data, size_t data_size) {
     int image_width = 0;
     int image_height = 0;
     unsigned char *image_data = stbi_load_from_memory(
-        (const unsigned char *)data, 
-        (int)data_size, 
+        static_cast<const unsigned char *>(data),
+        static_cast<int>(data_size),
         &image_width,
-        &image_height, 
-        NULL, 
+        &image_height,
+        nullptr,
         4
     );
-    
-    if (image_data == NULL)
-        return false;
 
-    // Create Metal texture
-    MTLTextureDescriptor *textureDescriptor = [MTLTextureDescriptor
-        texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
-        width:image_width
-        height:image_height
-        mipmapped:NO];
+    if (!image_data) {
+        return std::unexpected("Failed to decode image data");
+    }
+
+    auto imageDataCleanup = std::unique_ptr<unsigned char, decltype(&stbi_image_free)>(image_data, stbi_image_free);
+
+    MTLTextureDescriptor *textureDescriptor =
+        [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+                                                           width:static_cast<NSUInteger>(image_width)
+                                                          height:static_cast<NSUInteger>(image_height)
+                                                       mipmapped:NO];
     textureDescriptor.usage = MTLTextureUsageShaderRead;
-    textureDescriptor.storageMode = MTLStorageModeManaged;
+    textureDescriptor.storageMode = MTLStorageModeShared;
 
     id<MTLTexture> texture = [g_metalDevice newTextureWithDescriptor:textureDescriptor];
     if (!texture) {
-        stbi_image_free(image_data);
-        return false;
+        return std::unexpected("Failed to create Metal texture");
     }
 
-    [texture replaceRegion:MTLRegionMake2D(0, 0, image_width, image_height)
-                mipmapLevel:0
-                  withBytes:image_data
-                bytesPerRow:4 * image_width];
+    [texture
+        replaceRegion:MTLRegionMake2D(0, 0, static_cast<NSUInteger>(image_width), static_cast<NSUInteger>(image_height))
+          mipmapLevel:0
+            withBytes:image_data
+          bytesPerRow:4 * static_cast<NSUInteger>(image_width)];
 
-    *out_texture = (void *)CFBridgingRetain(texture);
-    *out_width = image_width;
-    *out_height = image_height;
-    
-    stbi_image_free(image_data);
-    return true;
+    TextureLoadResult result;
+    result.texture.reset(texture);
+    result.width = image_width;
+    result.height = image_height;
+
+    return result;
 }
 
-// Load texture from file
-bool LoadTextureFromFile(const char *file_name, void **out_texture, int *out_width, int *out_height) {
-    FILE *f = fopen(file_name, "rb");
-    if (f == NULL)
-        return false;
-    
-    fseek(f, 0, SEEK_END);
-    size_t file_size = (size_t)ftell(f);
-    if (file_size == -1) {
-        fclose(f);
-        return false;
+[[nodiscard]]
+std::expected<TextureLoadResult, std::string> LoadTextureFromFile(const char *fileName) {
+    std::ifstream file(fileName, std::ios::binary | std::ios::ate);
+    if (!file) {
+        return std::unexpected(std::format("Failed to open file: {}", fileName));
     }
-    
-    fseek(f, 0, SEEK_SET);
-    void *file_data = malloc(file_size);
-    fread(file_data, 1, file_size, f);
-    fclose(f);
-    
-    bool ret = LoadTextureFromMemory(file_data, file_size, out_texture, out_width, out_height);
-    free(file_data);
-    return ret;
+
+    const std::streamsize fileSize = file.tellg();
+    if (fileSize <= 0) {
+        return std::unexpected("Failed to determine file size");
+    }
+
+    file.seekg(0, std::ios::beg);
+
+    std::vector<char> fileData(static_cast<size_t>(fileSize));
+    if (!file.read(fileData.data(), fileSize)) {
+        return std::unexpected(std::format("Failed to read file: expected {} bytes", fileSize));
+    }
+
+    return LoadTextureFromMemory(fileData.data(), static_cast<size_t>(fileSize));
 }
+
+namespace AccountProcessor {
+    using AccountSnapshot = AccountData;
+
+    struct ProcessResult {
+            int id;
+            std::string userId;
+            std::string username;
+            std::string displayName;
+            std::string status;
+            std::string lastLocation;
+            uint64_t placeId = 0;
+            std::string jobId;
+            std::string voiceStatus;
+            time_t banExpiry = 0;
+            time_t voiceBanExpiry = 0;
+            bool shouldDeselect = false;
+            bool isInvalid = false;
+    };
+
+    [[nodiscard]]
+    std::vector<AccountSnapshot> takeAccountSnapshots() {
+        std::shared_lock lock(g_accountsMutex);
+        return {g_accounts.begin(), g_accounts.end()};
+    }
+
+    [[nodiscard]]
+    ProcessResult processAccount(const AccountSnapshot &account) {
+        ProcessResult result {
+            .id = account.id,
+            .userId = account.userId,
+            .username = account.username,
+            .displayName = account.displayName,
+            .status = "Unknown"
+        };
+
+        if (account.cookie.empty()) {
+            return result;
+        }
+
+        auto accountInfo = Roblox::fetchFullAccountInfo(account.cookie);
+
+        if (!accountInfo) {
+            switch (accountInfo.error()) {
+                case Roblox::ApiError::InvalidCookie:
+                    result.isInvalid = true;
+                    result.status = "InvalidCookie";
+                    result.voiceStatus = "N/A";
+                    result.shouldDeselect = true;
+                    return result;
+
+                case Roblox::ApiError::NetworkError:
+                case Roblox::ApiError::Timeout:
+                case Roblox::ApiError::ConnectionFailed:
+                    result.status = "Network Error";
+                    result.voiceStatus = "N/A";
+                    result.shouldDeselect = false;
+                    return result;
+
+                default:
+                    result.status = "Error";
+                    result.voiceStatus = "N/A";
+                    return result;
+            }
+        }
+
+        const auto &info = *accountInfo;
+
+        result.userId = std::to_string(info.userId);
+        result.username = info.username;
+        result.displayName = info.displayName;
+
+        switch (info.banInfo.status) {
+            case Roblox::BanCheckResult::InvalidCookie:
+                result.isInvalid = true;
+                result.status = "InvalidCookie";
+                result.voiceStatus = "N/A";
+                result.shouldDeselect = true;
+                return result;
+
+            case Roblox::BanCheckResult::Banned:
+                result.status = "Banned";
+                result.banExpiry = info.banInfo.endDate;
+                result.voiceStatus = "N/A";
+                result.shouldDeselect = true;
+                return result;
+
+            case Roblox::BanCheckResult::Warned:
+                result.status = "Warned";
+                result.shouldDeselect = true;
+                break;
+
+            case Roblox::BanCheckResult::Terminated:
+                result.status = "Terminated";
+                result.voiceStatus = "N/A";
+                result.shouldDeselect = true;
+                return result;
+
+            case Roblox::BanCheckResult::NetworkError:
+                result.status = "Network Error";
+                result.voiceStatus = "N/A";
+                return result;
+
+            case Roblox::BanCheckResult::Unbanned:
+                break;
+        }
+
+        result.voiceStatus = info.voiceSettings.status;
+        result.voiceBanExpiry = info.voiceSettings.bannedUntil;
+        result.status = info.presence;
+
+        if (info.userId != 0 && info.banInfo.status == Roblox::BanCheckResult::Unbanned) {
+            auto presenceData = Roblox::getPresenceData(account.cookie, info.userId);
+            if (presenceData) {
+                result.status = presenceData->presence;
+                result.lastLocation = presenceData->lastLocation;
+                result.placeId = presenceData->placeId;
+                result.jobId = presenceData->jobId;
+            }
+        }
+
+        return result;
+    }
+
+    void applyResults(const std::vector<ProcessResult> &results) {
+        std::unique_lock lock(g_accountsMutex);
+
+        for (const auto &result: results) {
+            auto it = std::ranges::find_if(g_accounts, [&result](const AccountData &a) {
+                return a.id == result.id;
+            });
+
+            if (it == g_accounts.end()) {
+                continue;
+            }
+
+            it->userId = result.userId;
+            it->username = result.username;
+            it->displayName = result.displayName;
+            it->status = result.status;
+            it->lastLocation = result.lastLocation;
+            it->placeId = result.placeId;
+            it->jobId = result.jobId;
+            it->voiceStatus = result.voiceStatus;
+            it->banExpiry = result.banExpiry;
+            it->voiceBanExpiry = result.voiceBanExpiry;
+
+            if (result.shouldDeselect) {
+                {
+                    std::lock_guard selLock(g_selectionMutex);
+                    g_selectedAccountIds.erase(result.id);
+                }
+            }
+        }
+
+        invalidateAccountIndex();
+    }
+
+    void showInvalidCookieModal(std::vector<int> invalidIds, std::string invalidNames) {
+        if (invalidIds.empty()) {
+            return;
+        }
+
+        ThreadTask::RunOnMain([ids = std::move(invalidIds), names = std::move(invalidNames)]() {
+            auto message = std::format("Invalid cookies for: {}. Remove them?", names);
+
+            ModalPopup::AddYesNo(message.c_str(), [ids]() {
+                std::unique_lock lock(g_accountsMutex);
+
+                std::erase_if(g_accounts, [&ids](const AccountData &a) {
+                    return std::ranges::find(ids, a.id) != ids.end();
+                });
+
+                invalidateAccountIndex();
+
+                for (int id: ids) {
+                    g_selectedAccountIds.erase(id);
+                }
+
+                Data::SaveAccounts();
+            });
+        });
+    }
+} // namespace AccountProcessor
+
+void refreshAccounts() {
+    auto snapshots = AccountProcessor::takeAccountSnapshots();
+
+    std::vector<std::future<AccountProcessor::ProcessResult>> futures;
+    futures.reserve(snapshots.size());
+
+    for (const auto &snapshot: snapshots) {
+        futures.push_back(std::async(std::launch::async, [snapshot]() {
+            return AccountProcessor::processAccount(snapshot);
+        }));
+    }
+
+    std::vector<AccountProcessor::ProcessResult> results;
+    results.reserve(futures.size());
+
+    std::vector<int> invalidIds;
+    std::string invalidNames;
+
+    for (size_t i = 0; i < futures.size(); ++i) {
+        auto result = futures[i].get();
+
+        if (result.isInvalid) {
+            invalidIds.push_back(result.id);
+            if (!invalidNames.empty()) {
+                invalidNames.append(", ");
+            }
+            const auto &snapshot = snapshots[i];
+            invalidNames.append(snapshot.displayName.empty() ? snapshot.username : snapshot.displayName);
+        }
+
+        results.push_back(std::move(result));
+    }
+
+    ThreadTask::RunOnMain([results = std::move(results),
+                           invalidIds = std::move(invalidIds),
+                           invalidNames = std::move(invalidNames)]() mutable {
+        AccountProcessor::applyResults(results);
+        Data::SaveAccounts();
+        LOG_INFO("Loaded accounts and refreshed statuses");
+
+        AccountProcessor::showInvalidCookieModal(std::move(invalidIds), std::move(invalidNames));
+    });
+}
+
+void startAccountRefreshLoop() {
+    ThreadTask::fireAndForget([] {
+        refreshAccounts();
+
+        while (g_running.load(std::memory_order_relaxed)) {
+            std::this_thread::sleep_for(std::chrono::minutes(g_statusRefreshInterval));
+
+            if (!g_running.load()) {
+                break;
+            }
+
+            refreshAccounts();
+        }
+    });
+}
+
+void initializeAutoUpdater() {
+    /*
+        ## GitHub Release Setup
+
+        For delta updates to work, structure releases like this:
+
+        Release v1.1.0
+        ├── macOS/
+        │   ├── AltMan-macOS-arm64.app.zip
+        │   ├── AltMan-macOS-x86_64.app.zip
+        │   └── deltas/
+        │       ├── AltMan-Delta-1.0.0-to-1.1.0-macOS-arm64.bsdiff
+        │       └── AltMan-Delta-1.0.0-to-1.1.0-macOS-x86_64.bsdiff
+        │
+        ├── Windows/
+        │   ├── AltMan-Windows-x86_64.exe
+        │   ├── AltMan-Windows-arm64.exe
+        │   └── deltas/
+        │       ├── AltMan-Delta-1.0.0-to-1.1.0-Windows-x86_64.xdelta
+        │       └── AltMan-Delta-1.0.0-to-1.1.0-Windows-arm64.xdelta
+        │
+        └── beta/
+            └── AltMan-Windows-x86_64-beta.exe
+
+
+        Creating Delta Patches
+        Windows (xdelta3):
+        ```xdelta3 -e -s AltMan-1.0.0-Windows-x86_64.exe AltMan-1.1.0-Windows-x86_64.exe
+       AltMan-Delta-1.0.0-to-1.1.0-Windows-x86_64.xdelta```
+        ```xdelta3 -e -s AltMan-1.0.0-Windows-arm64.exe AltMan-1.1.0-Windows-arm64.exe
+       AltMan-Delta-1.0.0-to-1.1.0-Windows-arm64.xdelta``` macOS (bsdiff): Extract slices
+        ```lipo AltMan-1.0.0.app/Contents/MacOS/AltMan -thin arm64 -output old.arm64```
+        ```lipo AltMan-1.1.0.app/Contents/MacOS/AltMan -thin arm64 -output new.arm64```
+
+        ```lipo AltMan-1.0.0.app/Contents/MacOS/AltMan -thin x86_64 -output old.x86_64```
+        ```lipo AltMan-1.1.0.app/Contents/MacOS/AltMan -thin x86_64 -output new.x86_64```
+
+        Create deltas per architecture
+        ```xdelta3 -e -s old.arm64 new.arm64 AltMan-Delta-1.0.0-to-1.1.0-macOS-arm64.xdelta```
+        ```xdelta3 -e -s old.x86_64 new.x86_64 AltMan-Delta-1.0.0-to-1.1.0-macOS-x86_64.xdelta```
+        OR (preferred for macOS binaries):
+        ```bsdiff old.arm64 new.arm64 AltMan-Delta-1.0.0-to-1.1.0-macOS-arm64.bsdiff```
+        ```bsdiff old.x86_64 new.x86_64 AltMan-Delta-1.0.0-to-1.1.0-macOS-x86_64.bsdiff```
+
+        Re-assemble after patch
+        ```lipo patched.arm64 patched.x86_64 -create -output AltMan```
+
+
+
+
+        **NEW way**
+        Release v1.1.0
+        ├── AltMan-Windows-x86_64.exe
+        ├── AltMan-Windows-arm64.exe
+        ├── AltMan-macOS.zip                                    # Universal binary .app
+        ├── AltMan-Delta-1.0.0-to-1.1.0-Windows-x86_64.xdelta
+        ├── AltMan-Delta-1.0.0-to-1.1.0-Windows-arm64.xdelta
+        ├── AltMan-Delta-1.0.0-to-1.1.0-macOS-arm64.bsdiff      # arm64 slice patch
+        └── AltMan-Delta-1.0.0-to-1.1.0-macOS-x86_64.bsdiff     # x86_64 slice patch
+
+
+        # macOS - Extract slices from universal binaries, create per-arch deltas
+        lipo AltMan-1.0.0.app/Contents/MacOS/AltMan -thin arm64 -output old_arm64
+        lipo AltMan-1.1.0.app/Contents/MacOS/AltMan -thin arm64 -output new_arm64
+        bsdiff old_arm64 new_arm64 AltMan-Delta-1.0.0-to-1.1.0-macOS-arm64.bsdiff
+
+        lipo AltMan-1.0.0.app/Contents/MacOS/AltMan -thin x86_64 -output old_x86_64
+        lipo AltMan-1.1.0.app/Contents/MacOS/AltMan -thin x86_64 -output new_x86_64
+        bsdiff old_x86_64 new_x86_64 AltMan-Delta-1.0.0-to-1.1.0-macOS-x86_64.bsdiff
+
+        # Windows - per architecture
+        xdelta3 -e -s old_x86_64.exe new_x86_64.exe AltMan-Delta-1.0.0-to-1.1.0-Windows-x86_64.xdelta
+        xdelta3 -e -s old_arm64.exe new_arm64.exe AltMan-Delta-1.0.0-to-1.1.0-Windows-arm64.xdelta
+     */
+    AutoUpdater::Initialize();
+    AutoUpdater::SetBandwidthLimit(5_MB);
+    AutoUpdater::SetUpdateChannel(UpdateChannel::Stable);
+    AutoUpdater::SetAutoUpdate(true, true, false);
+    ClientUpdateChecker::UpdateChecker::Initialize();
+}
+
+@interface AppDelegate : NSObject <NSApplicationDelegate>
+@end
+
+@implementation AppDelegate
+- (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender {
+    return YES;
+}
+@end
 
 @interface AppViewController : NSViewController <MTKViewDelegate>
 @end
@@ -149,27 +516,25 @@ bool LoadTextureFromFile(const char *file_name, void **out_texture, int *out_wid
     MTKView *_view;
     id<MTLCommandQueue> _commandQueue;
     ImGuiContext *_imguiContext;
+    float _lastDPIScale;
 }
 
 - (instancetype)init {
     self = [super init];
     if (self) {
-        // Create Metal device
         g_metalDevice = MTLCreateSystemDefaultDevice();
         _commandQueue = [g_metalDevice newCommandQueue];
         g_commandQueue = _commandQueue;
+        _lastDPIScale = 1.0f;
 
-        // Setup Dear ImGui context
         IMGUI_CHECKVERSION();
         _imguiContext = ImGui::CreateContext();
-        ImGuiIO &io = ImGui::GetIO(); (void)io;
+
+        ImGuiIO &io = ImGui::GetIO();
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 
         ImGui::StyleColorsDark();
-        
-        // Load fonts
-        ReloadFonts(1.0f);
     }
     return self;
 }
@@ -178,10 +543,21 @@ bool LoadTextureFromFile(const char *file_name, void **out_texture, int *out_wid
     ImGui_ImplMetal_Shutdown();
     ImGui_ImplOSX_Shutdown();
     ImGui::DestroyContext();
+
+#if !__has_feature(objc_arc)
+    [super dealloc];
+#endif
+}
+
+- (void)applicationWillTerminate:(NSNotification *)notification {
+    g_running = false;
 }
 
 - (void)loadView {
-    NSRect frame = NSMakeRect(0, 0, 1000, 560);
+    constexpr CGFloat windowWidth = 1000.0;
+    constexpr CGFloat windowHeight = 560.0;
+
+    NSRect frame = NSMakeRect(0, 0, windowWidth, windowHeight);
     _view = [[MTKView alloc] initWithFrame:frame device:g_metalDevice];
     _view.delegate = self;
     _view.clearColor = MTLClearColorMake(0.45, 0.55, 0.60, 1.00);
@@ -190,52 +566,69 @@ bool LoadTextureFromFile(const char *file_name, void **out_texture, int *out_wid
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-
-    // Setup Platform/Renderer backends
     ImGui_ImplOSX_Init(self.view);
     ImGui_ImplMetal_Init(g_metalDevice);
+
+    CGFloat scale = self.view.window.screen.backingScaleFactor ?: NSScreen.mainScreen.backingScaleFactor;
+    _lastDPIScale = static_cast<float>(scale);
+    ReloadFonts(_lastDPIScale);
 }
 
 - (void)drawInMTKView:(MTKView *)view {
-    // Process main thread tasks
-    MainThread::Process();
+    IM_ASSERT([NSThread isMainThread]);
+
+    ThreadTask::RunOnMainUpdate();
+
+    const CGFloat framebufferScale = view.window.screen.backingScaleFactor ?: NSScreen.mainScreen.backingScaleFactor;
+
+    const float currentScale = static_cast<float>(framebufferScale);
+    if (std::abs(currentScale - _lastDPIScale) > 0.01f) {
+        _lastDPIScale = currentScale;
+        ReloadFonts(_lastDPIScale);
+    }
 
     ImGuiIO &io = ImGui::GetIO();
-    io.DisplaySize.x = view.bounds.size.width;
-    io.DisplaySize.y = view.bounds.size.height;
 
-    CGFloat framebufferScale = view.window.screen.backingScaleFactor ?: NSScreen.mainScreen.backingScaleFactor;
-    io.DisplayFramebufferScale = ImVec2(framebufferScale, framebufferScale);
+    io.DisplaySize = ImVec2(
+        static_cast<float>(view.drawableSize.width) / currentScale,
+        static_cast<float>(view.drawableSize.height) / currentScale
+    );
+    io.DisplayFramebufferScale = ImVec2(currentScale, currentScale);
 
     id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
-
     MTLRenderPassDescriptor *renderPassDescriptor = view.currentRenderPassDescriptor;
-    if (renderPassDescriptor == nil) {
-        [commandBuffer commit];
+
+    if (!renderPassDescriptor) {
         return;
     }
 
-    // Start the Dear ImGui frame
     ImGui_ImplMetal_NewFrame(renderPassDescriptor);
     ImGui_ImplOSX_NewFrame(view);
     ImGui::NewFrame();
 
-    // Render UI
     const ImGuiViewport *viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(viewport->WorkSize);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
 
-    bool shouldQuit = RenderUI();
+    bool shouldQuit = false;
+    {
+        std::shared_lock lock(g_accountsMutex);
+        shouldQuit = RenderUI();
+    }
+
+    if (g_fontReloadPending.exchange(false)) {
+        ImGui_ImplMetal_DestroyDeviceObjects();
+        ImGui_ImplMetal_CreateDeviceObjects(g_metalDevice);
+    }
 
     ImGui::PopStyleVar(1);
-
-    // Rendering
     ImGui::Render();
-    ImDrawData *drawData = ImGui::GetDrawData();
 
+    ImDrawData *drawData = ImGui::GetDrawData();
     id<MTLRenderCommandEncoder> renderEncoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
-    [renderEncoder pushDebugGroup:@"Dear ImGui rendering"];
+
+    [renderEncoder pushDebugGroup:@ "Dear ImGui rendering"];
     ImGui_ImplMetal_RenderDrawData(drawData, commandBuffer, renderEncoder);
     [renderEncoder popDebugGroup];
     [renderEncoder endEncoding];
@@ -249,185 +642,61 @@ bool LoadTextureFromFile(const char *file_name, void **out_texture, int *out_wid
 }
 
 - (void)mtkView:(MTKView *)view drawableSizeWillChange:(CGSize)size {
-    // Handle resize if needed
 }
 
 @end
 
-int main(int argc, const char * argv[]) {
+NSWindow *createMainWindow() {
+    constexpr CGFloat windowWidth = 1000.0;
+    constexpr CGFloat windowHeight = 560.0;
+
+    NSRect frame = NSMakeRect(0, 0, windowWidth, windowHeight);
+
+    NSWindow *window =
+        [[NSWindow alloc] initWithContentRect:frame
+                                    styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
+                                              | NSWindowStyleMaskResizable | NSWindowStyleMaskMiniaturizable
+                                      backing:NSBackingStoreBuffered
+                                        defer:NO];
+
+    [window setTitle:@ "AltMan"];
+    [window center];
+
+    return window;
+}
+
+int main(int argc, const char *argv[]) {
     @autoreleasepool {
-        // Load data before creating UI
-        Data::LoadSettings("settings.json");
-        if (g_checkUpdatesOnStartup) {
-            CheckForUpdates();
+        if (auto result = Crypto::initialize(); !result) {
+            std::println("Failed to initialize crypto library {}", Crypto::errorToString(result.error()));
+            return 1;
         }
+
+        HttpClient::RateLimiter::instance().configure(50, std::chrono::milliseconds(1000));
+
+        Data::LoadSettings("settings.json");
+
+        if (g_checkUpdatesOnStartup) {
+            initializeAutoUpdater();
+        }
+
         Data::LoadAccounts("accounts.json");
         Data::LoadFriends("friends.json");
 
-        // Start background refresh thread
-        auto refreshAccounts = [] {
-            std::vector<int> invalidIds;
-            std::string names;
-            for (auto &acct: g_accounts) {
-                if (acct.cookie.empty())
-                    continue;
-                auto banInfo = Roblox::checkBanStatus(acct.cookie);
-                if (banInfo.status == Roblox::BanCheckResult::InvalidCookie) {
-                    invalidIds.push_back(acct.id);
-                    if (!names.empty())
-                        names += ", ";
-                    names += acct.displayName.empty() ? acct.username : acct.displayName;
-                } else if (banInfo.status == Roblox::BanCheckResult::Banned) {
-                    acct.status = "Banned";
-                    acct.banExpiry = banInfo.endDate;
-                    g_selectedAccountIds.erase(acct.id);
-                } else if (banInfo.status == Roblox::BanCheckResult::Warned) {
-                    acct.status = "Warned";
-                    acct.banExpiry = 0;
-                    g_selectedAccountIds.erase(acct.id);
-                } else if (banInfo.status == Roblox::BanCheckResult::Terminated) {
-                    acct.status = "Terminated";
-                    acct.banExpiry = 0;
-                    g_selectedAccountIds.erase(acct.id);
-                }
-            }
-            
-            // Refresh all account info...
-            for (auto &acct: g_accounts) {
-                if (acct.cookie.empty() && acct.userId.empty())
-                    continue;
+        startAccountRefreshLoop();
 
-                bool needsUserInfoUpdate = true;
-                uint64_t uid = 0;
-
-                if (!acct.cookie.empty()) {
-                    auto banInfo = Roblox::checkBanStatus(acct.cookie);
-                    if (banInfo.status == Roblox::BanCheckResult::Banned) {
-                        acct.status = "Banned";
-                        acct.banExpiry = banInfo.endDate;
-                        acct.voiceStatus = "N/A";
-                        acct.voiceBanExpiry = 0;
-                        continue;
-                    } else if (banInfo.status == Roblox::BanCheckResult::Warned) {
-                        acct.status = "Warned";
-                        acct.banExpiry = 0;
-                        acct.voiceStatus = "N/A";
-                        acct.voiceBanExpiry = 0;
-                        continue;
-                    } else if (banInfo.status == Roblox::BanCheckResult::Terminated) {
-                        acct.status = "Terminated";
-                        acct.banExpiry = 0;
-                        acct.voiceStatus = "N/A";
-                        acct.voiceBanExpiry = 0;
-                        continue;
-                    } else if (banInfo.status == Roblox::BanCheckResult::Unbanned) {
-                        auto userJson = Roblox::getAuthenticatedUser(acct.cookie);
-                        if (!userJson.empty()) {
-                            acct.userId = std::to_string(userJson.value("id", 0ULL));
-                            acct.username = userJson.value("name", "");
-                            acct.displayName = userJson.value("displayName", "");
-                            needsUserInfoUpdate = false;
-
-                            try {
-                                uid = std::stoull(acct.userId);
-                                auto presences = Roblox::getPresences({uid}, acct.cookie);
-                                if (!presences.empty()) {
-                                    auto it = presences.find(uid);
-                                    if (it != presences.end()) {
-                                        acct.status = it->second.presence;
-                                        acct.lastLocation = it->second.lastLocation;
-                                        acct.placeId = it->second.placeId;
-                                        acct.jobId = it->second.jobId;
-                                    } else {
-                                        acct.status = "Offline";
-                                    }
-                                } else {
-                                    acct.status = Roblox::getPresence(acct.cookie, uid);
-                                }
-                                auto vs = Roblox::getVoiceChatStatus(acct.cookie);
-                                acct.voiceStatus = vs.status;
-                                acct.voiceBanExpiry = vs.bannedUntil;
-                                acct.banExpiry = 0;
-                            } catch (...) {
-                                acct.status = "Error";
-                            }
-                        }
-                    }
-                }
-
-                if (needsUserInfoUpdate && !acct.userId.empty()) {
-                    try {
-                        uid = std::stoull(acct.userId);
-                        auto userInfo = Roblox::getUserInfo(acct.userId);
-                        if (userInfo.id != 0) {
-                            acct.username = userInfo.username;
-                            acct.displayName = userInfo.displayName;
-                            acct.status = "Cookie Invalid";
-                            acct.voiceStatus = "N/A";
-                            acct.voiceBanExpiry = 0;
-                        } else {
-                            acct.status = "Error: Invalid UserID";
-                        }
-                    } catch (...) {
-                        acct.status = "Error: Invalid UserID";
-                    }
-                }
-            }
-            Data::SaveAccounts();
-            LOG_INFO("Loaded accounts and refreshed statuses");
-
-            if (!invalidIds.empty()) {
-                std::string namesCopy = names;
-                MainThread::Post([invalidIds, namesCopy]() {
-                    char buf[512];
-                    snprintf(buf, sizeof(buf), "Invalid cookies for: %s. Remove them?", namesCopy.c_str());
-                    ConfirmPopup::Add(buf, [invalidIds]() {
-                        erase_if(g_accounts, [&](const AccountData &a) {
-                            return std::find(invalidIds.begin(), invalidIds.end(), a.id) != invalidIds.end();
-                        });
-                        for (int id: invalidIds) {
-                            g_selectedAccountIds.erase(id);
-                        }
-                        Data::SaveAccounts();
-                    });
-                });
-            }
-        };
-
-        Threading::newThread([refreshAccounts] {
-            refreshAccounts();
-            while (true) {
-                std::this_thread::sleep_for(std::chrono::minutes(g_statusRefreshInterval));
-                LOG_INFO("Refreshing account statuses...");
-                refreshAccounts();
-                LOG_INFO("Refreshed account statuses");
-            }
-        });
-
-        // Create application
         NSApplication *app = [NSApplication sharedApplication];
         [app setActivationPolicy:NSApplicationActivationPolicyRegular];
 
-        // Create window
-        NSRect frame = NSMakeRect(0, 0, 1000, 560);
-        NSWindow *window = [[NSWindow alloc]
-            initWithContentRect:frame
-            styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable | NSWindowStyleMaskMiniaturizable
-            backing:NSBackingStoreBuffered
-            defer:NO];
-        
-        [window setTitle:@"AltMan"];
-        [window center];
+        AppDelegate *appDelegate = [[AppDelegate alloc] init];
+        [app setDelegate:appDelegate];
 
-        // Create view controller
+        NSWindow *window = createMainWindow();
         AppViewController *viewController = [[AppViewController alloc] init];
         [window setContentViewController:viewController];
 
-        // Show window
         [window makeKeyAndOrderFront:nil];
         [app activateIgnoringOtherApps:YES];
-
-        // Run app
         [app run];
     }
     return 0;
